@@ -97,7 +97,7 @@ function project(cwd) {
   return p;
 }
 
-// trust roster: .keka/team.md lines like "- dev@co — trust: full|quarantine"; absent file =
+// trust roster: .keka/team.md lines like "- dev@co — trust: full|workspace"; absent file =
 // everyone full trust (fail-open by design — solo use must not require a roster)
 function roster(cwd) {
   const map = {};
@@ -105,7 +105,7 @@ function roster(cwd) {
     const f = path.join(String(cwd || process.env.CLAUDE_PROJECT_DIR || process.cwd()), '.keka', 'team.md');
     for (const line of fs.readFileSync(f, 'utf8').split('\n')) {
       const email = line.match(/[\w.+-]+@[\w.-]+\w/);
-      const trust = line.match(/trust:\s*(full|quarantine)/i);
+      const trust = line.match(/trust:\s*(full|workspace)/i);
       if (email && trust) map[email[0].toLowerCase()] = trust[1].toLowerCase();
     }
   } catch { /* no roster */ }
@@ -119,13 +119,13 @@ function norm(text) { return String(text).toLowerCase().replace(/\s+/g, ' ').tri
 
 function add(type, text, confidence, proj, source, extra) {
   const x = extra || {};
-  db().prepare('INSERT INTO memories(type,text,text_key,confidence,project,source,author,task,quarantine) VALUES(?,?,?,?,?,?,?,?,?)')
+  db().prepare('INSERT INTO memories(type,text,text_key,confidence,project,source,author,task,workspace) VALUES(?,?,?,?,?,?,?,?,?)')
     .run(TYPES.has(type) ? type : 'note', String(text), norm(text),
       confidence == null ? 0.7 : Number(confidence),
       proj ? project(proj) : null, source || null,
       x.author !== undefined ? x.author : author(),
       x.task !== undefined ? x.task : task(null, proj),
-      x.quarantine ? 1 : 0);
+      x.workspace ? 1 : 0);
 }
 function forget(id) {
   const row = db().prepare('SELECT text FROM memories WHERE id = ?').get(Number(id));
@@ -171,7 +171,7 @@ function search(q, opts) {
 
 function shortLine(r) {
   const t = r.text.length > 100 ? r.text.slice(0, 100) + '...' : r.text;
-  return `#${r.id} [${r.type}]${r.quarantine ? ' [quarantined]' : ''} ${t} (conf ${Number(r.confidence).toFixed(2)})`;
+  return `#${r.id} [${r.type}]${r.workspace ? ' [workspace]' : ''} ${t} (conf ${Number(r.confidence).toFixed(2)})`;
 }
 
 function brief(maxChars, proj) {
@@ -190,11 +190,11 @@ function brief(maxChars, proj) {
      ORDER BY created DESC, rowid DESC LIMIT 1`
   ).get(p);
   if (last) push(`Last session here (${String(last.created).slice(0, 16)}): ${last.summary || last.first_prompt}`);
-  // affine ranking: same-task memories outrank same-project outrank global; quarantined never enter.
+  // affine ranking: same-task memories outrank same-project outrank global; workspace rows never enter.
   // ponytail: 500-newest candidate window keeps startup bounded; widen if ranking visibly misses
   const t = task(null, proj);
   const w = (r) => score(r) * (r.project === p ? 1.5 : 1) * (t && r.task === t ? 1.5 : 1);
-  const rows = db().prepare('SELECT * FROM memories WHERE quarantine IS NOT 1 ORDER BY created DESC, id DESC LIMIT 500').all()
+  const rows = db().prepare('SELECT * FROM memories WHERE workspace IS NOT 1 ORDER BY created DESC, id DESC LIMIT 500').all()
     .sort((a, b) => w(b) - w(a));
   if (rows.length) push('Top memories:');
   for (const r of rows) {
@@ -240,8 +240,8 @@ function pruneObservations(days) { // observations are session fuel, not knowled
 
 function seedExport(file, opts) {
   const o = opts || {};
-  // quarantined rows never re-export: they are someone else's claim, not yours to share
-  let sql = 'SELECT type, text, confidence, project, source, author, task, created FROM memories WHERE quarantine IS NOT 1';
+  // workspace rows never re-export: they are someone else's claim, held privately, not yours to pass on
+  let sql = 'SELECT type, text, confidence, project, source, author, task, created FROM memories WHERE workspace IS NOT 1';
   const params = [];
   if (o.task) { sql += ' AND task = ?'; params.push(o.task); }
   if (o.project) { sql += ' AND project = ?'; params.push(project(o.project)); }
@@ -252,32 +252,32 @@ function seedExport(file, opts) {
 }
 
 function seedImport(file, dir) {
-  const trust = roster(dir); // quarantined authors: confidence capped, flagged, never enter the brief
+  const trust = roster(dir); // workspace-trust authors: confidence capped, held private, never in the brief
   const lines = fs.readFileSync(file, 'utf8').split('\n').filter((l) => l.trim());
-  const find = db().prepare('SELECT id, author, quarantine FROM memories WHERE text_key = ? LIMIT 1');
-  let added = 0, dup = 0, quarantined = 0, promoted = 0;
+  const find = db().prepare('SELECT id, author, workspace FROM memories WHERE text_key = ? LIMIT 1');
+  let added = 0, dup = 0, workspace = 0, promoted = 0;
   for (const line of lines) {
     let r; try { r = JSON.parse(line); } catch { continue; }
     if (!r.text) continue;
     const au = r.author ? String(r.author).toLowerCase() : null;
-    const q = !!(au && trust[au] === 'quarantine');
+    const w = !!(au && trust[au] === 'workspace');
     const conf = r.confidence == null ? 0.7 : Number(r.confidence);
     const row = find.get(norm(r.text));
     if (row) {
       dup++;
       // trust changed since the last import? apply it to the existing row (both directions)
-      if (row.author && au && String(row.author).toLowerCase() === au && !!row.quarantine !== q) {
-        db().prepare('UPDATE memories SET quarantine = ?, confidence = ? WHERE id = ?')
-          .run(q ? 1 : 0, q ? Math.min(conf, 0.3) : conf, row.id);
-        if (q) quarantined++; else promoted++;
+      if (row.author && au && String(row.author).toLowerCase() === au && !!row.workspace !== w) {
+        db().prepare('UPDATE memories SET workspace = ?, confidence = ? WHERE id = ?')
+          .run(w ? 1 : 0, w ? Math.min(conf, 0.3) : conf, row.id);
+        if (w) workspace++; else promoted++;
       }
       continue;
     }
-    add(r.type || 'note', r.text, q ? Math.min(conf, 0.3) : r.confidence, r.project, r.source,
-      { author: r.author || null, task: r.task || null, quarantine: q });
-    added++; if (q) quarantined++;
+    add(r.type || 'note', r.text, w ? Math.min(conf, 0.3) : r.confidence, r.project, r.source,
+      { author: r.author || null, task: r.task || null, workspace: w });
+    added++; if (w) workspace++;
   }
-  return { added, dup, quarantined, promoted };
+  return { added, dup, workspace, promoted };
 }
 
 // ---------- CLI ----------
@@ -311,7 +311,7 @@ function cli() {
       const rows = search(rest.join(' '), { ...flags, limit: flags.full ? 20 : 8 });
       if (!rows.length) console.log('no matches');
       for (const r of rows) console.log(flags.full
-        ? `#${r.id} [${r.type}]${r.quarantine ? ' [quarantined]' : ''} (conf ${r.confidence}) ${r.author ? '@' + r.author + ' ' : ''}${r.source ? '<' + r.source + '> ' : ''}${r.text}`
+        ? `#${r.id} [${r.type}]${r.workspace ? ' [workspace]' : ''} (conf ${r.confidence}) ${r.author ? '@' + r.author + ' ' : ''}${r.source ? '<' + r.source + '> ' : ''}${r.text}`
         : r._display);
       break;
     }
@@ -339,7 +339,7 @@ function cli() {
       }
       const r = seedImport(rest[0] || 'seed.jsonl', dir || process.cwd());
       console.log(`imported ${r.added} new / ${r.dup} dup`
-        + (r.quarantined ? ` / ${r.quarantined} quarantined` : '')
+        + (r.workspace ? ` / ${r.workspace} to workspace` : '')
         + (r.promoted ? ` / ${r.promoted} promoted` : ''));
       break;
     }

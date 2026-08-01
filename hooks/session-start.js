@@ -21,7 +21,7 @@ process.stdin.on('end', () => {
       const seed = require('node:path').join(String(data.cwd || process.cwd()), '.keka', 'team-seed.jsonl');
       if (fs.existsSync(seed)) {
         const n = fs.readFileSync(seed, 'utf8').split('\n').filter((l) => l.trim()).length;
-        out.push(`Team seed present (.keka/team-seed.jsonl, ${n} entries) — run /share import to load teammate memories.`);
+        out.push(`Team seed present (.keka/team-seed.jsonl, ${n} entries) — run /handoff import to load teammate memories.`);
       }
     } catch { /* nudge is optional */ }
     if (out.length) console.log(out.join('\n\n'));

@@ -21,20 +21,20 @@ const run = (file, input, extraEnv) => spawnSync('node', [path.join(__dirname, f
 });
 
 // session-start: exit 0 (empty DB -> possibly no output)
-let r = run('session-start.js', { session_id: 'hs1', cwd: 'E:/proj' });
+let r = run('session-start.js', { session_id: 'hs1', cwd: '/demo/proj' });
 assert.strictEqual(r.status, 0, 'session-start exit 0');
 
 // prompt: records first prompt, no output
-r = run('prompt.js', { session_id: 'hs1', cwd: 'E:/proj', prompt: 'build the widget' });
+r = run('prompt.js', { session_id: 'hs1', cwd: '/demo/proj', prompt: 'build the widget' });
 assert.strictEqual(r.status, 0, 'prompt exit 0');
 assert.strictEqual(r.stdout.trim(), '', 'prompt is silent');
 
 // prompt on a session that never had SessionStart (resume) -> row still created
-r = run('prompt.js', { session_id: 'resumed-1', cwd: 'E:/proj', prompt: 'continue the widget' });
+r = run('prompt.js', { session_id: 'resumed-1', cwd: '/demo/proj', prompt: 'continue the widget' });
 assert.strictEqual(r.status, 0, 'prompt (resumed) exit 0');
 
 // observe: success row + failure row (FAIL prefix)
-r = run('observe.js', { session_id: 'hs1', tool_name: 'Edit', tool_input: { file_path: 'E:/proj/a.js' } });
+r = run('observe.js', { session_id: 'hs1', tool_name: 'Edit', tool_input: { file_path: '/demo/proj/a.js' } });
 assert.strictEqual(r.status, 0, 'observe exit 0');
 r = run('observe.js', { session_id: 'hs1', hook_event_name: 'PostToolUseFailure', tool_name: 'Bash', tool_input: { command: 'npm  test' } });
 assert.strictEqual(r.status, 0, 'observe failure exit 0');
@@ -44,7 +44,7 @@ r = run('observe.js', { session_id: 'hs1', tool_name: 'Edit', tool_input: { file
 assert.strictEqual(r.status, 0, 'inner guard exit 0');
 
 // session-end (LEARN off): closes row deterministically
-r = run('session-end.js', { session_id: 'hs1', cwd: 'E:/proj' });
+r = run('session-end.js', { session_id: 'hs1', cwd: '/demo/proj' });
 assert.strictEqual(r.status, 0, 'session-end exit 0');
 
 // session-start: team-seed nudge when .keka/team-seed.jsonl is committed in the repo
@@ -54,14 +54,14 @@ fs.writeFileSync(path.join(seedProj, '.keka', 'team-seed.jsonl'),
   JSON.stringify({ type: 'note', text: 'teammate fact' }) + '\n' + JSON.stringify({ type: 'note', text: 'another fact' }) + '\n');
 r = run('session-start.js', { session_id: 'hs2', cwd: seedProj });
 assert.strictEqual(r.status, 0, 'session-start seed exit 0');
-assert.ok(r.stdout.includes('team-seed.jsonl') && r.stdout.includes('2 entries') && r.stdout.includes('/share import'),
+assert.ok(r.stdout.includes('team-seed.jsonl') && r.stdout.includes('2 entries') && r.stdout.includes('/handoff import'),
   'seed nudge emitted: ' + r.stdout);
 
 // session-start: brief appears once memory + a previous session exist
-r = spawnSync('node', [path.join(__dirname, 'engine.js'), 'add', 'learning', 'hooks smoke memory', '0.9', '--project', 'E:/proj'],
+r = spawnSync('node', [path.join(__dirname, 'engine.js'), 'add', 'learning', 'hooks smoke memory', '0.9', '--project', '/demo/proj'],
   { encoding: 'utf8', env, timeout: 20000 });
 assert.strictEqual(r.status, 0, 'engine add exit 0: ' + r.stderr);
-r = run('session-start.js', { session_id: 'hs3', cwd: 'E:/proj' });
+r = run('session-start.js', { session_id: 'hs3', cwd: '/demo/proj' });
 assert.ok(r.stdout.includes('## Keka memory brief'), 'brief header emitted: ' + r.stdout);
 assert.ok(r.stdout.includes('hooks smoke memory'), 'memory in brief');
 assert.ok(r.stdout.includes('Last session here'), 'last session line in brief');
@@ -76,7 +76,7 @@ assert.ok(act.session, 'session row exists');
 assert.strictEqual(act.session.first_prompt, 'build the widget', 'first prompt recorded');
 assert.ok(act.session.ended, 'session closed');
 assert.strictEqual(act.session.summary, 'build the widget', 'summary fallback = first prompt');
-assert.deepStrictEqual(act.observations.map((o) => o.digest), ['edit E:/proj/a.js', 'FAIL npm test'],
+assert.deepStrictEqual(act.observations.map((o) => o.digest), ['edit demo/proj/a.js', 'FAIL npm test'],
   'two observations, inner-guarded call wrote nothing, failure marked');
 const resumed = e.sessionActivity('resumed-1').session;
 assert.ok(resumed, 'resumed session row created by prompt hook');

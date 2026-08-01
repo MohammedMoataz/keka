@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS memories (
   source     TEXT,                       -- url | session id | manual
   author     TEXT,                       -- git user.email of whoever wrote it
   task       TEXT,                       -- branch name or explicit --task tag
-  quarantine INTEGER DEFAULT 0,          -- 1 = imported from a quarantined author; never enters brief
+  workspace  INTEGER DEFAULT 0,          -- 1 = private workspace only; findable, but never enters the brief
   created    TEXT DEFAULT (datetime('now')),
   uses       INTEGER DEFAULT 0
 );

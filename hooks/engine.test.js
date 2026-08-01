@@ -43,11 +43,11 @@ const b = e.brief(300);
 assert.ok(b.length <= 300, `brief capped (${b.length})`);
 
 // sessions + observations
-e.sessionStart('s1', 'E:/proj');
-e.sessionStart('s1', 'E:/proj'); // idempotent
+e.sessionStart('s1', '/demo/proj');
+e.sessionStart('s1', '/demo/proj'); // idempotent
 e.firstPrompt('s1', 'build the thing');
 e.firstPrompt('s1', 'should not overwrite');
-e.observe('s1', 'Edit', 'E:/proj/a.js', 'edit proj/a.js');
+e.observe('s1', 'Edit', '/demo/proj/a.js', 'edit proj/a.js');
 e.observe('s1', 'Bash', '', 'npm test');
 const act = e.sessionActivity('s1');
 assert.strictEqual(act.session.first_prompt, 'build the thing', 'first prompt kept');
@@ -85,12 +85,12 @@ assert.strictEqual(e.forget(99999), null, 'forget missing id -> null');
 assert.strictEqual(e.normalizeRemote('git@github.com:Org/Repo.git'), 'github.com/org/repo', 'ssh remote normalized');
 assert.strictEqual(e.normalizeRemote('https://user:token@GitHub.com/Org/Repo.git'), 'github.com/org/repo', 'credentials stripped');
 assert.strictEqual(e.normalizeRemote('https://github.com/org/repo'), 'github.com/org/repo', 'plain https normalized');
-assert.strictEqual(e.project('E:/NoSuchDir'), 'e:/nosuchdir', 'non-repo fallback: lowercased path');
+assert.strictEqual(e.project('/Demo/NoSuchDir'), '/demo/nosuchdir', 'non-repo fallback: lowercased path');
 
 // project-affine brief: same-project memory outranks stronger global one; lines carry ids
-e.add('note', 'project-local wisdom', 0.6, 'E:/proj', null);
+e.add('note', 'project-local wisdom', 0.6, '/demo/proj', null);
 e.add('note', 'global wisdom', 0.7, null, null);
-const pb = e.brief(4000, 'E:/proj');
+const pb = e.brief(4000, '/demo/proj');
 assert.ok(pb.indexOf('project-local wisdom') < pb.indexOf('global wisdom'), 'project memory ranked first');
 assert.match(pb, /- \[note #\d+\] project-local wisdom/, 'brief lines carry ids');
 assert.ok(pb.includes('Last session here'), 'brief includes last session line');
@@ -114,77 +114,78 @@ const trow = JSON.parse(fs.readFileSync(tseed, 'utf8').trim());
 assert.strictEqual(trow.author, 'tester@example.com', 'seed row carries author');
 assert.strictEqual(trow.task, 'orders-v2', 'seed row carries task');
 
-// roster + quarantine import: intern capped and flagged, unknown author full trust
+// roster + workspace import: new joiner capped and held private, unknown author full trust
 const teamProj = path.join(tmp, 'teamproj');
 fs.mkdirSync(path.join(teamProj, '.keka'), { recursive: true });
 fs.writeFileSync(path.join(teamProj, '.keka', 'team.md'),
-  '# Team\n- architect@example.com — trust: full\n- intern@example.com — trust: quarantine\n');
+  '# Team\n- architect@example.com — trust: full\n- joiner@example.com — trust: workspace\n');
 assert.deepStrictEqual(e.roster(teamProj),
-  { 'architect@example.com': 'full', 'intern@example.com': 'quarantine' }, 'roster parsed');
+  { 'architect@example.com': 'full', 'joiner@example.com': 'workspace' }, 'roster parsed');
 assert.deepStrictEqual(e.roster(path.join(tmp, 'no-roster')), {}, 'missing roster = empty');
 const mixSeed = path.join(tmp, 'mix-seed.jsonl');
 fs.writeFileSync(mixSeed, [
-  JSON.stringify({ type: 'learning', text: 'intern shaky claim', confidence: 0.9, author: 'intern@example.com', task: 'orders-v2' }),
+  JSON.stringify({ type: 'learning', text: 'joiner unverified claim', confidence: 0.9, author: 'joiner@example.com', task: 'orders-v2' }),
   JSON.stringify({ type: 'learning', text: 'architect solid decision', confidence: 0.9, author: 'architect@example.com', task: 'orders-v2' }),
   JSON.stringify({ type: 'note', text: 'stranger note', confidence: 0.8, author: 'stranger@example.com' }),
 ].join('\n') + '\n');
 const imp = e.seedImport(mixSeed, teamProj);
 assert.strictEqual(imp.added, 3, 'all three imported');
-assert.strictEqual(imp.quarantined, 1, 'one quarantined');
-const internRow = e.search('intern shaky', { full: true })[0];
-assert.strictEqual(internRow.quarantine, 1, 'intern row flagged');
-assert.ok(internRow.confidence <= 0.3, 'intern confidence capped');
+assert.strictEqual(imp.workspace, 1, 'one held in workspace');
+const joinerRow = e.search('joiner unverified', { full: true })[0];
+assert.strictEqual(joinerRow.workspace, 1, 'joiner row held private');
+assert.ok(joinerRow.confidence <= 0.3, 'joiner confidence capped');
 const archRow = e.search('architect solid', { full: true })[0];
-assert.strictEqual(archRow.quarantine, 0, 'roster full = untouched');
+assert.strictEqual(archRow.workspace, 0, 'roster full = untouched');
 assert.strictEqual(archRow.confidence, 0.9, 'confidence kept');
 const strangerRow = e.search('stranger note', { full: true })[0];
-assert.strictEqual(strangerRow.quarantine, 0, 'unknown author = full trust');
-assert.ok(e.search('intern shaky')[0]._display.includes('[quarantined]'), 'search marks quarantined');
+assert.strictEqual(strangerRow.workspace, 0, 'unknown author = full trust');
+assert.ok(e.search('joiner unverified')[0]._display.includes('[workspace]'), 'search marks workspace rows');
 
-// quarantined rows never re-export (someone else's claim is not yours to share)
+// workspace rows never re-export (someone else's claim, held privately, not yours to pass on)
 const reseed = path.join(tmp, 'reseed.jsonl');
 e.seedExport(reseed);
-assert.ok(!fs.readFileSync(reseed, 'utf8').includes('intern shaky'), 'quarantined excluded from export');
+assert.ok(!fs.readFileSync(reseed, 'utf8').includes('joiner unverified'), 'workspace row excluded from export');
 
 // project-filtered export
 const pseed = path.join(tmp, 'proj-seed.jsonl');
-const pn = e.seedExport(pseed, { project: 'E:/proj' });
+const pn = e.seedExport(pseed, { project: '/demo/proj' });
 assert.ok(pn >= 1, 'project-filtered export non-empty');
 for (const line of fs.readFileSync(pseed, 'utf8').trim().split('\n')) {
-  assert.strictEqual(JSON.parse(line).project, 'e:/proj', 'every exported row belongs to the project');
+  assert.strictEqual(JSON.parse(line).project, '/demo/proj', 'every exported row belongs to the project');
 }
 
-// brief: quarantined excluded entirely; task-affine boost outranks stronger untasked memory
+// brief: workspace rows excluded entirely; task-affine boost outranks stronger untasked memory
 process.env.KEKA_TASK = 'orders-v2';
-e.add('note', 'current-task wisdom', 0.6, 'E:/proj', null, { task: 'orders-v2' });
-e.add('note', 'untasked wisdom', 0.7, 'E:/proj', null, { task: null });
-const qb = e.brief(8000, 'E:/proj');
-assert.ok(!qb.includes('intern shaky claim'), 'quarantined never in brief');
+e.add('note', 'current-task wisdom', 0.6, '/demo/proj', null, { task: 'orders-v2' });
+e.add('note', 'untasked wisdom', 0.7, '/demo/proj', null, { task: null });
+const qb = e.brief(8000, '/demo/proj');
+assert.ok(!qb.includes('joiner unverified claim'), 'workspace row never in brief');
 assert.ok(qb.indexOf('current-task wisdom') < qb.indexOf('untasked wisdom'), 'task memory ranked first');
 delete process.env.KEKA_TASK;
 
-// trust promotion: roster flips to full, re-import lifts the flag and restores confidence
+// promotion: roster raises trust, re-import moves the row into the brief with confidence restored
 fs.writeFileSync(path.join(teamProj, '.keka', 'team.md'),
-  '# Team\n- architect@example.com — trust: full\n- intern@example.com — trust: full\n');
+  '# Team\n- architect@example.com — trust: full\n- joiner@example.com — trust: full\n');
 const imp2 = e.seedImport(mixSeed, teamProj);
 assert.strictEqual(imp2.added, 0, 'no new rows on re-import');
-assert.strictEqual(imp2.promoted, 1, 'intern promoted');
-const lifted = e.search('intern shaky', { full: true })[0];
-assert.strictEqual(lifted.quarantine, 0, 'quarantine flag lifted');
+assert.strictEqual(imp2.promoted, 1, 'joiner promoted');
+const lifted = e.search('joiner unverified', { full: true })[0];
+assert.strictEqual(lifted.workspace, 0, 'no longer workspace-only');
 assert.strictEqual(lifted.confidence, 0.9, 'confidence restored');
+assert.ok(e.brief(8000, '/demo/proj').includes('joiner unverified claim'), 'promoted row now reaches the brief');
 
-// and demotion: trust drops, re-import re-quarantines
-fs.writeFileSync(path.join(teamProj, '.keka', 'team.md'), '- intern@example.com — trust: quarantine\n');
+// and back down: trust lowered, re-import returns the row to the workspace
+fs.writeFileSync(path.join(teamProj, '.keka', 'team.md'), '- joiner@example.com — trust: workspace\n');
 const imp3 = e.seedImport(mixSeed, teamProj);
-assert.strictEqual(imp3.quarantined, 1, 'intern re-quarantined');
-const dropped = e.search('intern shaky', { full: true })[0];
-assert.strictEqual(dropped.quarantine, 1, 'flag reapplied');
+assert.strictEqual(imp3.workspace, 1, 'joiner returned to workspace');
+const dropped = e.search('joiner unverified', { full: true })[0];
+assert.strictEqual(dropped.workspace, 1, 'flag reapplied');
 assert.ok(dropped.confidence <= 0.3, 'confidence capped again');
 
 // roster parsing tolerates tight punctuation (no space before the dash)
 const tightProj = path.join(tmp, 'tight');
 fs.mkdirSync(path.join(tightProj, '.keka'), { recursive: true });
-fs.writeFileSync(path.join(tightProj, '.keka', 'team.md'), '- dev@co.com—trust: quarantine\n');
-assert.deepStrictEqual(e.roster(tightProj), { 'dev@co.com': 'quarantine' }, 'roster tolerates missing space');
+fs.writeFileSync(path.join(tightProj, '.keka', 'team.md'), '- dev@co.com—trust: workspace\n');
+assert.deepStrictEqual(e.roster(tightProj), { 'dev@co.com': 'workspace' }, 'roster tolerates missing space');
 
 console.log('engine.test.js: ALL PASS');
