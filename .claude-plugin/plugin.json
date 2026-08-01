@@ -2,7 +2,7 @@
   "name": "keka",
   "displayName": "Keka",
   "version": "0.1.0",
-  "description": "Memory for Claude Code: a session brief that compounds, automatic session-end learnings, /recall search, and team sharing over git with a trust roster. One feature, done well. Zero runtime dependencies.",
+  "description": "Memory for Claude Code: a session brief that compounds, automatic session-end learnings, /recall search, and team handoff over git with a trust roster. Zero runtime dependencies.",
   "author": { "name": "Moataz", "email": "m.moataz@ignteq.org" },
   "homepage": "https://github.com/MohammedMoataz/keka",
   "license": "MIT",

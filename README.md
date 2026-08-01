@@ -4,22 +4,16 @@
 
 <h1 align="center">keka</h1>
 
-<p align="center"><b>A harness for Claude Code — served one piece at a time.</b><br>
+<p align="center"><b>Memory for Claude Code.</b><br>
 <i>keka = piece of cake. The promise is the name: the work should feel easy.</i></p>
 
 ---
 
 ## Why keka exists
 
-An earlier harness proved the ideas — memory that compounds, spec-driven building, verified research, an ambient companion. But it grew into one big plugin doing many unrelated jobs at once. Too much to adopt, too much to test, too much to explain in one sitting.
+Every session starts cold. You re-explain the same constraint, rediscover the same trap, and lose whatever a teammate already learned on the branch you just checked out.
 
-**keka is that harness, rebuilt one feature at a time.** Each release does *one* pure thing, well. Ship it, let the team feel the change, gather feedback, then ship the next piece. The cake gets built slice by slice — but every slice on its own is a piece of cake to adopt.
-
-## The rule
-
-- **One feature per release.** Nothing bundled. If a release does two unrelated things, it's two releases.
-- **Each feature earns its place.** It ships only after it's tested and the value is felt.
-- **Feedback between slices.** Leaders and teammates react to each piece before the next lands.
+keka makes memory the thing that carries over — and the thing you can hand to someone else. It records what a session did, distils what was worth keeping, and puts that in front of you the next time you sit down in the same repo.
 
 ## Install
 
@@ -32,9 +26,9 @@ claude plugin install keka@keka
 
 Dev mode without installing: `claude --plugin-dir <clone-directory>`.
 
-## v0.1.0 — Memory (current release)
+## How it works
 
-Memory that compounds across sessions and travels across the team. Everything lives in one zero-dependency SQLite DB at `~/.keka/keka.db`; errors go to `~/.keka/log.jsonl`, never into your session.
+Everything lives in one zero-dependency SQLite DB at `~/.keka/keka.db`; errors go to `~/.keka/log.jsonl`, never into your session.
 
 **What happens automatically:**
 
@@ -62,22 +56,12 @@ Memory that compounds across sessions and travels across the team. Everything li
 
 **Tests:** `node hooks/engine.test.js && node hooks/hooks.test.js` — no framework, throwaway DB.
 
-Under the hood this is the older harness's memory subsystem, rebuilt with its known bugs fixed: portable project identity (git remote URL, so teammate imports rank correctly on any machine), bounded brief queries, read-only search (recall no longer resets the decay clock), normalized+indexed dedup, resumed-session tracking, real session summaries, observation retention, and failures logged instead of swallowed.
+## Design notes
 
-## Roadmap (the cake)
+Small enough to read in one sitting: one engine module, five hook wirings, two skills, no runtime dependencies.
 
-Features to port one at a time. Order is a suggestion, not a commitment — the foundation comes first, the rest follows demand:
-
-1. **Memory** — session brief + observations + session-end learnings, plus `/recall` and `/handoff` with a trust roster. ✅ **v0.1.0**
-2. **Prompt coach** — zero-cost hints on vague prompts.
-3. **Secrets guard** — block keys/credentials before they reach the model.
-4. **Spec flow** — specify → clarify → blueprint → tasks → implement → converge.
-5. **Research** — decompose → parallel researchers → adversarial claim gate → cited synthesis.
-6. **Graphify** — codebase architecture graphs.
-7. **Patterns / Stack / Onboard** — convention manual + stack profile + brownfield setup.
-8. **Feature tools** — review-feature / document-feature / commit-pr.
-9. **Handoff docs** — written task handoffs on top of the memory handoff that already ships.
-10. **Ingest** — documents → markdown.
-11. **Buddy** — ambient statusline companion.
-
-Pick the next slice when the last one has landed and been felt. Not before.
+- **Project identity travels.** A project is keyed by its git remote URL, not the path it happens to sit at, so an imported memory ranks correctly on every machine.
+- **Reading is free.** Search never touches a memory's decay clock — what you grep does not outrank what mattered.
+- **Deduplication is normalized and indexed.** Case and whitespace variants of the same fact are the same fact.
+- **The brief is bounded.** Ranking runs over a candidate window, so session startup does not slow down as the database grows.
+- **Failures are visible.** A broken hook writes the reason to the log rather than silently doing nothing.
