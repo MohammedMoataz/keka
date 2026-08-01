@@ -1,0 +1,22 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|clear",
+        "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.js\"", "statusMessage": "Injecting memory brief..." }]
+      }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/prompt.js\"", "timeout": 10, "statusMessage": "Recording session..." }] }
+    ],
+    "PostToolUse": [
+      { "matcher": "Edit|Write|Bash", "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/observe.js\"", "statusMessage": "Recording observation..." }] }
+    ],
+    "PostToolUseFailure": [
+      { "matcher": "Edit|Write|Bash", "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/observe.js\"", "statusMessage": "Recording failure..." }] }
+    ],
+    "SessionEnd": [
+      { "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/session-end.js\"", "timeout": 60, "statusMessage": "Distilling session learnings..." }] }
+    ]
+  }
+}

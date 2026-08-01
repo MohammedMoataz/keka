@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120" fill="none" role="img" aria-labelledby="kekaTitle kekaDesc">
+  <title id="kekaTitle">keka</title>
+  <desc id="kekaDesc">A single slice of cake — piece of cake.</desc>
+
+  <!-- sponge wedge -->
+  <path d="M16 82 L104 82 L104 44 Z" fill="#F2B34C" stroke="#3A2A22" stroke-width="3.5" stroke-linejoin="round"/>
+
+  <!-- chocolate layer -->
+  <path d="M30 76 L102 76" stroke="#7A4A2E" stroke-width="3" stroke-linecap="round"/>
+  <!-- cream layer -->
+  <path d="M44 69 L100 69" stroke="#FCE9D6" stroke-width="6" stroke-linecap="round"/>
+
+  <!-- frosting sliver along the top edge, dripping toward the tip -->
+  <path d="M16 82 L104 44 L104 56 C84 60 78 53 66 57 C54 61 48 54 36 58 C28 60 24 64 16 82 Z" fill="#F2A6B4"/>
+
+  <!-- cherry -->
+  <path d="M92 34 C90 28 86 26 83 25" stroke="#3A2A22" stroke-width="2.4" stroke-linecap="round"/>
+  <circle cx="92" cy="37" r="6" fill="#E4544B" stroke="#3A2A22" stroke-width="2.4"/>
+  <circle cx="89.8" cy="34.8" r="1.6" fill="#FBD9D4"/>
+</svg>

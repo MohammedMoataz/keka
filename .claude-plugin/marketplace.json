@@ -1,0 +1,14 @@
+{
+  "name": "keka",
+  "owner": { "name": "Moataz" },
+  "description": "keka distribution: a harness for Claude Code, served one feature at a time.",
+  "plugins": [
+    {
+      "name": "keka",
+      "source": "./",
+      "description": "Memory: compounding session brief, session-end learnings, /recall search, team sharing over git.",
+      "category": "productivity",
+      "tags": ["memory", "team", "knowledge-sharing"]
+    }
+  ]
+}
