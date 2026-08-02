@@ -57,6 +57,18 @@ assert.strictEqual(r.status, 0, 'session-start seed exit 0');
 assert.ok(r.stdout.includes('team-seed.jsonl') && r.stdout.includes('2 entries') && r.stdout.includes('/handoff import'),
   'seed nudge emitted: ' + r.stdout);
 
+// partners: nudge until dismissed; mode-sensitive
+r = run('session-start.js', { session_id: 'hp1', cwd: '/demo/proj' });
+assert.ok(r.stdout.includes('/partners'), 'partners nudge emitted: ' + r.stdout);
+r = run('session-start.js', { session_id: 'hp2', cwd: '/demo/proj' }, { KEKA_PARTNERS: 'off' });
+assert.ok(!r.stdout.includes('/partners'), 'partners off = silent');
+r = run('session-start.js', { session_id: 'hp3', cwd: '/demo/proj' }, { KEKA_PARTNERS: 'auto' });
+assert.ok(r.stdout.includes('partners mode: auto'), 'auto mode restated every session: ' + r.stdout);
+r = spawnSync('node', [path.join(__dirname, 'engine.js'), 'partners-seen'], { encoding: 'utf8', env, timeout: 20000 });
+assert.strictEqual(r.status, 0, 'partners-seen exit 0: ' + r.stderr);
+r = run('session-start.js', { session_id: 'hp4', cwd: '/demo/proj' });
+assert.ok(!r.stdout.includes('/partners'), 'nudge gone after partners-seen: ' + r.stdout);
+
 // session-start: brief appears once memory + a previous session exist
 r = spawnSync('node', [path.join(__dirname, 'engine.js'), 'add', 'learning', 'hooks smoke memory', '0.9', '--project', '/demo/proj'],
   { encoding: 'utf8', env, timeout: 20000 });

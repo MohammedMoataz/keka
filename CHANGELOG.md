@@ -2,6 +2,14 @@
 
 Releases are git tags.
 
+## v0.2.0 — Partners (2026-08-02)
+
+A curated catalog, not a bundle — keka still ships zero dependencies.
+
+- **/partners** — six recommended companion tools (ast-grep, graphify, spec-kit, chrome-devtools, obsidian, gsd-browser), each with a one-line why, an installed-check, and an install command. Installs only what the user picks, verifies, and records each install as a `reference` memory so future session briefs know the tool exists.
+- **`partners` setting** — `ask` (default, pick-to-install), `auto` (a missing partner may be installed when a task needs it; stated at every session start and reported each time), `off`.
+- **One-time nudge** — session start mentions `/partners` once, until the first run dismisses it (`engine.js partners-seen`).
+
 ## v0.1.0 — Memory (2026-08-01)
 
 Memory that compounds across sessions and travels across the team.

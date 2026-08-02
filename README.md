@@ -41,6 +41,7 @@ Everything lives in one zero-dependency SQLite DB at `~/.keka/keka.db`; errors g
 - **`/recall <query>`** — FTS search over memory, progressive disclosure (short lines first, `--full` on demand).
 - **`/handoff`** — package this project's memories into `.keka/team-seed.jsonl`; commit it, git is the transport.
 - **`/handoff import`** — pick up a teammate's memories. Idempotent, and the trust roster decides where each one lands.
+- **`/partners`** — a curated catalog of tools that pair well with memory. Detects what you have, briefs you on what's missing, installs only what you pick.
 
 **Brief or workspace.** Full-trust memories join your ranked session brief like your own. Memories from a teammate marked `workspace` stay private to your machine instead: confidence capped, never auto-injected, never re-exported — but still findable in `/recall`, marked `[workspace]`. It's a holding area, not a penalty box; raise their trust, re-import, and their memories move up into the brief with confidence restored.
 
@@ -52,13 +53,25 @@ Everything lives in one zero-dependency SQLite DB at `~/.keka/keka.db`; errors g
 - new-joiner@example.com — trust: workspace
 ```
 
-**Config** (plugin settings, or `KEKA_*` env override): `brief_chars` (default 4000), `learn` (default on).
+**Config** (plugin settings, or `KEKA_*` env override): `brief_chars` (default 4000), `learn` (default on), `partners` (`ask` | `auto` | `off`, default `ask`).
 
 **Tests:** `node hooks/engine.test.js && node hooks/hooks.test.js` — no framework, throwaway DB.
 
+## Partners
+
+keka bundles nothing beyond memory — but some tools pair well with it. `/partners` is a catalog, not a dependency list: one-line brief per tool, a check for what's already installed, and installs only for what you pick. Each verified install is recorded as a `reference` memory, so the next session's brief already knows the tool exists.
+
+The catalog: **ast-grep** (structural code search and codemods), **graphify** (architecture answers from a code graph), **spec-kit** (spec-driven development flow), **chrome-devtools** (live browser debugging over MCP), **obsidian** (notes vault access over MCP), **gsd-browser** (browser automation daemon).
+
+Modes, via the `partners` setting:
+
+- `ask` (default) — nothing installs without your pick. A one-line reminder appears at session start until the first `/partners` run.
+- `auto` — pre-consent: when a task needs a capability a missing partner provides, it may be installed mid-task, and you're told each time. Restated at every session start so the consent is always visible.
+- `off` — silence.
+
 ## Design notes
 
-Small enough to read in one sitting: one engine module, five hook wirings, two skills, no runtime dependencies.
+Small enough to read in one sitting: one engine module, five hook wirings, three skills, no runtime dependencies.
 
 - **Project identity travels.** A project is keyed by its git remote URL, not the path it happens to sit at, so an imported memory ranks correctly on every machine.
 - **Reading is free.** Search never touches a memory's decay clock — what you grep does not outrank what mattered.

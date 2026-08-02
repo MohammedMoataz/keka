@@ -1,8 +1,8 @@
 {
   "name": "keka",
   "displayName": "Keka",
-  "version": "0.1.0",
-  "description": "Memory for Claude Code: a session brief that compounds, automatic session-end learnings, /recall search, and team handoff over git with a trust roster. Zero runtime dependencies.",
+  "version": "0.2.0",
+  "description": "Memory for Claude Code: a session brief that compounds, automatic session-end learnings, /recall search, team handoff over git with a trust roster, and a /partners catalog of recommended companion tools. Zero runtime dependencies.",
   "author": { "name": "Moataz", "email": "m.moataz@ignteq.org" },
   "homepage": "https://github.com/MohammedMoataz/keka",
   "license": "MIT",
@@ -21,6 +21,12 @@
       "title": "Session-end learning compression",
       "description": "One Haiku call per session distills a summary and 0-3 durable learnings into memory. Requires `claude` on PATH.",
       "default": true
+    },
+    "partners": {
+      "type": "string",
+      "title": "Partner tool recommendations",
+      "description": "ask: /partners recommends, you pick what installs. auto: a missing partner may be installed when a task needs it (you are told each time). off: silence.",
+      "default": "ask"
     }
   }
 }

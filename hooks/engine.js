@@ -11,6 +11,7 @@ const HOME = path.join(os.homedir(), '.keka');
 const DB_PATH = process.env.KEKA_DB || path.join(HOME, 'keka.db');
 const SCHEMA_PATH = path.join(__dirname, '..', 'memory', 'schema.sql');
 const LOG_PATH = process.env.KEKA_LOG || path.join(HOME, 'log.jsonl');
+const PARTNERS_SEEN = path.join(path.dirname(DB_PATH), 'partners-seen'); // marker: /partners ran once, stop nudging
 
 // failures append here instead of vanishing — "keka just stopped working" must be diagnosable
 function log(where, err) {
@@ -343,19 +344,24 @@ function cli() {
         + (r.promoted ? ` / ${r.promoted} promoted` : ''));
       break;
     }
+    case 'partners-seen':
+      fs.mkdirSync(path.dirname(PARTNERS_SEEN), { recursive: true });
+      fs.writeFileSync(PARTNERS_SEEN, new Date().toISOString() + '\n');
+      console.log('partners nudge dismissed');
+      break;
     case 'export': console.log(JSON.stringify({
       memories: db().prepare('SELECT * FROM memories').all(),
       sessions: db().prepare('SELECT * FROM sessions').all(),
       observations: db().prepare('SELECT * FROM observations').all(),
     }, null, 2)); break;
     default:
-      console.log('usage: engine.js <init|add|forget|search|brief|session-start|session-end|observe|prune|seed-export|seed-import|export>');
+      console.log('usage: engine.js <init|add|forget|search|brief|session-start|session-end|observe|prune|seed-export|seed-import|partners-seen|export>');
   }
 }
 
 module.exports = {
   db, log, add, forget, hasText, norm, search, brief, sessionStart, firstPrompt, observe,
   sessionEnd, sessionActivity, pruneObservations, seedExport, seedImport,
-  project, normalizeRemote, opt, optOn, DB_PATH, LOG_PATH, author, task, taskSlug, roster,
+  project, normalizeRemote, opt, optOn, DB_PATH, LOG_PATH, PARTNERS_SEEN, author, task, taskSlug, roster,
 };
 if (require.main === module) cli();
