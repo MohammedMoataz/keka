@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.svg" width="140" alt="keka logo — a slice of cake">
+  <img src="assets/logo.png" width="140" alt="keka logo — a slice of cake">
 </p>
 
 <h1 align="center">keka</h1>
