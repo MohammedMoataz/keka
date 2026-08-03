@@ -2,6 +2,15 @@
 
 Releases are git tags.
 
+## v0.3.0 — Coach, Guard, Conventions (2026-08-03)
+
+- **Prompt coach** — regex hints on vague prompts (user-facing only, never injected into model context); in plan mode one Haiku call scores the prompt and suggests a rewrite, with a 1h cooldown after any CLI failure and a `KEKA_CLAUDE_BIN` override that makes the tier testable. Settings: `coach`, `plan_review`.
+- **Secrets guard** — PreToolUse on Bash/WebFetch/Read/Write/Edit/NotebookEdit. Real credentials (AWS/STS, GitHub, Slack, OpenAI-style, private keys, Azure connection strings, Slack webhooks) block everywhere including file writes; secret-ish payloads ask on outbound tools only; credential-file paths ask on Read *and* inside Bash commands, with `.example`/`.sample`/`.template`/`.dist` exempt. Scans raw values rather than serialized JSON, so escapes can't evade it. Fails open, logged. Setting: `guard`.
+- **/prompt** — five templates + the 10 rules, with draft review.
+- **/stack** — project profile at `.keka/stack.md`; amends, never overwrites; values kept free of example prose.
+- **/patterns** — convention manual at `.keka/patterns/` (index + numbered concern files, every pattern cites `path:line`); `init` records a reference memory so future briefs know the manual exists.
+- **/onboard** — detect what's in place, then `/stack` → `/patterns init` → `/partners` → team setup; every step skippable, errors reported without aborting the chain.
+
 ## v0.2.0 — Partners (2026-08-02)
 
 A curated catalog, not a bundle — keka still ships zero dependencies.

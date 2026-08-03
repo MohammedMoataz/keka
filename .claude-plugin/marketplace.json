@@ -6,7 +6,7 @@
     {
       "name": "keka",
       "source": "./",
-      "description": "Memory: compounding session brief, session-end learnings, /recall search, team handoff over git, /partners tool catalog.",
+      "description": "Memory + guardrails: compounding session brief, session-end learnings, /recall, team handoff over git, /partners catalog, prompt coach, secrets guard, /stack + /patterns + /onboard conventions.",
       "category": "productivity",
       "tags": ["memory", "team", "knowledge-sharing"]
     }

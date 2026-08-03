@@ -50,7 +50,7 @@ function haikuCompress(engine, firstPrompt, obsLines) {
       'with 0-3 learnings. Durable = useful in FUTURE sessions (environment quirks, decisions made, ' +
       'gotchas discovered). NOT task narration. Empty learnings array if nothing durable.\n\n' +
       'First prompt: ' + firstPrompt + '\nActions:\n' + obsLines;
-    const r = spawnSync('claude', ['-p', '--model', 'claude-haiku-4-5'], {
+    const r = spawnSync(process.env.KEKA_CLAUDE_BIN || 'claude', ['-p', '--model', 'claude-haiku-4-5'], {
       input: instructions,
       encoding: 'utf8',
       timeout: 45000,
