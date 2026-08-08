@@ -1,8 +1,8 @@
 {
   "name": "keka",
   "displayName": "Keka",
-  "version": "0.3.0",
-  "description": "Memory for Claude Code — plus guardrails and conventions: a session brief that compounds, session-end learnings, /recall search, team handoff over git, a /partners tool catalog, a prompt coach, a secrets guard, and /stack + /patterns + /onboard for team conventions. Zero runtime dependencies.",
+  "version": "0.4.0",
+  "description": "Memory for Claude Code — plus guardrails and conventions: a session brief that compounds, named sessions with author/role/branch identity, automatic branch recall, encrypted team handoff over git with private trust, /recall search, a /partners tool catalog, a prompt coach, a secrets guard, and /stack + /patterns + /onboard for team conventions. Zero runtime dependencies.",
   "author": { "name": "Moataz", "email": "m.moataz@ignteq.org" },
   "homepage": "https://github.com/MohammedMoataz/keka",
   "license": "MIT",
@@ -45,6 +45,18 @@
       "title": "Secrets guard",
       "description": "Blocks tool calls carrying real credentials (AWS/GitHub/Slack keys, private keys) and asks before secret-ish outbound payloads or credential-file reads. Fails open, logged.",
       "default": true
+    },
+    "seed_auto": {
+      "type": "boolean",
+      "title": "Keep the team seed current",
+      "description": "Refresh .keka/team-seed.jsonl on /compact, /clear and after each commit. Only ever touches a seed that already exists — running /handoff once is the opt-in. Never stages or commits anything.",
+      "default": true
+    },
+    "default_trust": {
+      "type": "string",
+      "title": "Trust for teammates you have not rated",
+      "description": "full: imported memories rank like your own. workspace: held privately with capped confidence until you raise them. Per-teammate trust is set with /team and stays on this machine.",
+      "default": "full"
     }
   }
 }

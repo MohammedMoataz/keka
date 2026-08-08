@@ -158,4 +158,39 @@ run('prompt.js', { session_id: 'c3', cwd: '/demo/proj', permission_mode: 'plan',
 assert.strictEqual(fs.readFileSync(stubCount, 'utf8'), 'x', 'one failure = cooldown, second call skips the spawn');
 assert.ok(fs.existsSync(path.join(tmp, 'coach-cooldown')), 'cooldown marker written next to the DB');
 
+// ---------- v0.4.0: session naming + seed refresh ----------
+
+// session-start names the session and tells Claude Code the same name
+r = run('session-start.js', { session_id: 'hn1', cwd: '/demo/named' });
+assert.strictEqual(r.status, 0, 'session-start exit 0');
+const started = JSON.parse(r.stdout);
+assert.ok(started.hookSpecificOutput.sessionTitle, 'session title emitted: ' + r.stdout);
+assert.strictEqual(started.hookSpecificOutput.hookEventName, 'SessionStart', 'correct event name');
+
+// seed-refresh does nothing when the project never opted in
+const refreshProj = path.join(tmp, 'refreshproj');
+fs.mkdirSync(path.join(refreshProj, '.keka'), { recursive: true });
+r = run('seed-refresh.js', { hook_event_name: 'PreCompact', trigger: 'manual', cwd: refreshProj });
+assert.strictEqual(r.status, 0, 'seed-refresh exit 0');
+assert.strictEqual(r.stdout.trim(), '', 'no seed file = silent, and none created');
+assert.ok(!fs.existsSync(path.join(refreshProj, '.keka', 'team-seed.jsonl')), 'seed never created unasked');
+
+// ...and refreshes it once the project has one
+r = spawnSync('node', [path.join(__dirname, 'engine.js'), 'add', 'note', 'refresh me', '0.8', '--project', refreshProj],
+  { encoding: 'utf8', env, timeout: 20000 });
+assert.strictEqual(r.status, 0, 'engine add exit 0: ' + r.stderr);
+fs.writeFileSync(path.join(refreshProj, '.keka', 'team-seed.jsonl'), '');
+r = run('seed-refresh.js', { hook_event_name: 'PreCompact', trigger: 'manual', cwd: refreshProj });
+assert.ok(r.stdout.includes('refreshed .keka/team-seed.jsonl'), 'compact refreshes the seed: ' + r.stdout);
+assert.ok(fs.readFileSync(path.join(refreshProj, '.keka', 'team-seed.jsonl'), 'utf8').includes('refresh me'),
+  'seed contains the project memory');
+
+// a commit refreshes it; any other Bash call does not
+fs.writeFileSync(path.join(refreshProj, '.keka', 'team-seed.jsonl'), '');
+r = run('seed-refresh.js', { hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'npm test' }, cwd: refreshProj });
+assert.strictEqual(r.stdout.trim(), '', 'ordinary bash call ignored');
+assert.strictEqual(fs.readFileSync(path.join(refreshProj, '.keka', 'team-seed.jsonl'), 'utf8'), '', 'seed untouched');
+r = run('seed-refresh.js', { hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'git commit -m "wip"' }, cwd: refreshProj });
+assert.ok(r.stdout.includes('refreshed .keka/team-seed.jsonl'), 'commit refreshes the seed: ' + r.stdout);
+
 console.log('hooks.test.js: ALL PASS');

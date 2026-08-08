@@ -32,6 +32,7 @@ process.stdin.on('end', () => {
       }
     }
     engine.pruneObservations(30); // observations are session fuel, not knowledge
+    engine.autoSeed(data.cwd);    // /clear and exit both land here — leave the seed current
   } catch (err) {
     try { (engine || require('./engine.js')).log('session-end', err); } catch { /* silent */ }
   }

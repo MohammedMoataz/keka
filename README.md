@@ -33,6 +33,9 @@ Everything lives in one zero-dependency SQLite DB at `~/.keka/keka.db`; errors g
 **What happens automatically:**
 
 - **Session brief** — every new session starts with what the last session here did plus the top-ranked memories (project- and task-affine, type-decayed, ≤4K chars). Each line carries its memory id, so a wrong memory can be forgotten on sight.
+- **Branch recall** — if anyone has worked on your current branch before, that history opens the brief: their session names, who they are, what they concluded, and the memories scoped to that branch. It gets its own reserved share of the brief, so a busy project can't crowd it out. Work on *other* branches stays where it belongs — behind `/recall`.
+- **Named, attributed sessions** — each session is recorded with a name (`<branch>-<username>`, or whatever you set), the author's email and username, their role, and the branch. Claude Code's own session list gets the same name.
+- **A seed that stays current** — once you've run `/handoff` in a repo, keka refreshes `.keka/team-seed.jsonl` on `/compact`, on `/clear`, and after each commit. It never creates the file uninvited and never touches git state.
 - **Observations** — every Edit/Write/Bash call becomes a one-line deterministic record; failures are marked `FAIL` (the richest learning signal).
 - **Session-end learnings** — one Haiku call per session compresses the last 40 observations into a one-line summary and 0–3 durable learnings. Deduped, confidence-clamped, off with `learn: false`.
 - **Prompt coach** — vague prompts get a one-line nudge ("name the file", "state what done looks like"). Shown to you only; the critique never enters the model's context. In plan mode, one optional Haiku call scores the prompt and suggests a rewrite — and backs off for an hour if the CLI misbehaves.
@@ -42,24 +45,30 @@ Everything lives in one zero-dependency SQLite DB at `~/.keka/keka.db`; errors g
 
 - **`/recall <query>`** — FTS search over memory, progressive disclosure (short lines first, `--full` on demand).
 - **`/handoff`** — package this project's memories into `.keka/team-seed.jsonl`; commit it, git is the transport.
-- **`/handoff import`** — pick up a teammate's memories. Idempotent, and the trust roster decides where each one lands.
+- **`/handoff import`** — pick up a teammate's memories and session history. Idempotent, and your private trust decides where each one lands.
+- **`/team`** — the project directory (who's here, what they do) and your private trust settings.
+- **`/name <label>`** — label this session for the people who read the history later.
 - **`/partners`** — a curated catalog of tools that pair well with memory. Detects what you have, briefs you on what's missing, installs only what you pick.
 - **`/prompt`** — templates (bugfix, feature, refactor, research, review) and the 10 rules for prompts that land; paste a draft and get a review.
 - **`/stack`** — capture the project profile (`.keka/stack.md`): roots, build/test/lint commands, conventions. Amends, never overwrites.
 - **`/patterns`** — author (`init`) or consult the convention manual at `.keka/patterns/`: how *this* codebase does commands, validation, forms… every pattern cites a real `path:line`.
 - **`/onboard`** — adopt keka in an existing repo: detect what's in place, then `/stack` → `/patterns init` → `/partners` → team setup, each step skippable.
 
-**Brief or workspace.** Full-trust memories join your ranked session brief like your own. Memories from a teammate marked `workspace` stay private to your machine instead: confidence capped, never auto-injected, never re-exported — but still findable in `/recall`, marked `[workspace]`. It's a holding area, not a penalty box; raise their trust, re-import, and their memories move up into the brief with confidence restored.
-
-**Trust roster** (`.keka/team.md`, optional — absent means everyone trusted):
+**Identity is shared; trust is private.** `.keka/team.md` is a directory everyone commits — name, email, role, nothing judgmental:
 
 ```markdown
 # Team
-- architect@example.com — trust: full
-- new-joiner@example.com — trust: workspace
+- Sara Malik <sara@example.com> — role: tech-lead
+- Lina Haddad <lina@example.com> — role: qa
 ```
 
-**Config** (plugin settings, or `KEKA_*` env override): `brief_chars` (default 4000), `learn` (default on), `partners` (`ask` | `auto` | `off`, default `ask`), `coach` (default on), `plan_review` (default on), `guard` (default on).
+Roles are snapshotted onto memories as they're written, so `/recall --role qa` keeps meaning "what the testers found" even after someone changes role.
+
+Whom you *trust* is a different question, and it stays on your machine — set with `/team trust <email> full|workspace`, never written to the shared file, never included in a seed. Nobody should have to commit "I don't trust this teammate yet" to a repository. Full-trust memories join your ranked brief like your own; `workspace` ones stay private with capped confidence, never auto-injected and never re-exported, but still findable in `/recall` marked `[workspace]`. It's a holding area, not a penalty box — raise their trust, re-import, and their memories move up with confidence restored.
+
+**Encrypted handoff.** The seed lives in git, so anyone with repo access can read it. Put a shared passphrase in `.keka/seed.key` (gitignored) or `KEKA_SEED_KEY`, hand off with `--encrypt`, and the file becomes an AES-256-GCM envelope. Import detects and decrypts it automatically; a wrong key or an altered file fails loudly rather than quietly — the GCM tag is the tamper check, which is why there's no separate signature to manage.
+
+**Config** (plugin settings, or `KEKA_*` env override): `brief_chars` (default 4000), `learn` (default on), `partners` (`ask` | `auto` | `off`, default `ask`), `coach` (default on), `plan_review` (default on), `guard` (default on), `seed_auto` (default on), `default_trust` (default `full`).
 
 **Tests:** `node hooks/engine.test.js && node hooks/hooks.test.js` — no framework, throwaway DB.
 
@@ -77,7 +86,7 @@ Modes, via the `partners` setting:
 
 ## Design notes
 
-Small enough to read in one sitting: one engine module, six hook wirings, seven skills, no runtime dependencies.
+Small enough to read in one sitting: one engine module, eight hook wirings, nine skills, no runtime dependencies.
 
 - **Project identity travels.** A project is keyed by its git remote URL, not the path it happens to sit at, so an imported memory ranks correctly on every machine.
 - **Reading is free.** Search never touches a memory's decay clock — what you grep does not outrank what mattered.
@@ -86,3 +95,5 @@ Small enough to read in one sitting: one engine module, six hook wirings, seven 
 - **Failures are visible.** A broken hook writes the reason to the log rather than silently doing nothing.
 - **The guard scans values, not serializations.** Patterns run against the raw strings inside a tool call, so escape characters can neither hide a secret nor cause a false hit.
 - **Coaching is for you, not the model.** Hints surface as user-facing messages only — a critique of the prompt injected next to the prompt steers answers toward meta-commentary.
+- **Upgrades widen the database in place.** The schema file can only create what's missing, so every added column is also applied as an explicit migration — an existing database gains the new shape instead of silently ignoring it.
+- **Session rows travel without breaking old readers.** They carry no `text` field, and every importer skips rows without one, so an older keka ignores them rather than choking.

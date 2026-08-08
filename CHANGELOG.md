@@ -2,6 +2,18 @@
 
 Releases are git tags.
 
+## v0.4.0 — Identity, sessions, and private trust (2026-08-03)
+
+- **Session identity** — sessions and memories now carry `username` and `role` alongside the author's email and branch. Roles are snapshotted when written, so `/recall --role qa` keeps meaning "what the testers found" after someone changes role. `/recall` gains `--role` and `--user`.
+- **Named sessions** — every session gets a name (`<branch>-<username>`, collisions suffixed), settable with **`/name`**, adopted from Claude Code's `/rename` when you've set one, and published back as the session title. Two teammates may use the same label; display disambiguates as `label@username` rather than refusing it.
+- **Branch recall** — prior sessions and memories on your current branch open the brief automatically, with a reserved share of the character budget so general memories can't crowd them out. Other branches stay manual via `/recall`.
+- **Identity shared, trust private** — `.keka/team.md` becomes a committed directory (name, email, role) with no trust field. Trust moves into a local `trust` table set with **`/team trust`**: never written to the shared file, never exported. Pre-0.4 rosters still work — their `trust:` values seed the private table once, then local values win.
+- **Self-refreshing seed** — `.keka/team-seed.jsonl` is kept current on `/compact`, `/clear` and after each commit. Only ever refreshes a seed that already exists (running `/handoff` is the opt-in) and never stages or commits. Setting: `seed_auto`.
+- **Sessions in the seed** — handoffs carry session history, not just memories. Session rows have no `text` field, so v0.1–0.3 importers skip them instead of failing.
+- **Encrypted handoff** — `seed-export --encrypt` seals the seed as an AES-256-GCM envelope (scrypt-derived key from `KEKA_SEED_KEY` or a gitignored `.keka/seed.key`). Import auto-detects and decrypts; a wrong key or altered file fails loudly. The GCM auth tag is the tamper check, so there is no separate signature.
+- **Schema migrations** — `schema.sql` can only create what's missing, so added columns are now also applied via explicit `ALTER TABLE` probes on open. Upgrading from v0.1–0.3 widens the existing database instead of silently ignoring the new shape; covered by a test that drives the CLI against a hand-built v0.3.0 database.
+- New settings: `seed_auto` (default on), `default_trust` (default `full`). New skills: `/team`, `/name`. New hook: `PreCompact`, plus a `Bash` PostToolUse wiring for post-commit refresh.
+
 ## v0.3.0 — Coach, Guard, Conventions (2026-08-03)
 
 - **Prompt coach** — regex hints on vague prompts (user-facing only, never injected into model context); in plan mode one Haiku call scores the prompt and suggests a rewrite, with a 1h cooldown after any CLI failure and a `KEKA_CLAUDE_BIN` override that makes the tier testable. Settings: `coach`, `plan_review`.

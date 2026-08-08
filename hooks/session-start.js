@@ -4,6 +4,27 @@
 // Never fails the session; failures go to ~/.keka/log.jsonl.
 if (process.env.KEKA_INNER) process.exit(0); // spawned claude -p children: no recursion, no rows
 
+const fs = require('node:fs');
+const path = require('node:path');
+const os = require('node:os');
+
+// If the user already named this session with /rename, adopt that name instead of
+// inventing one. The name is not in the hook payload; it lives in Claude Code's own
+// session metadata, whose layout is internal — so this is best-effort and never fatal.
+function claudeSessionName(id) {
+  try {
+    const dir = path.join(os.homedir(), '.claude', 'sessions');
+    for (const f of fs.readdirSync(dir)) {
+      if (!f.endsWith('.json')) continue;
+      try {
+        const j = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
+        if (j && j.sessionId === id && j.name) return String(j.name);
+      } catch { /* one unreadable file must not stop the scan */ }
+    }
+  } catch { /* directory absent or the layout changed — fall back to our own name */ }
+  return null;
+}
+
 let raw = '';
 process.stdin.on('data', (d) => (raw += d));
 process.stdin.on('end', () => {
@@ -11,8 +32,7 @@ process.stdin.on('end', () => {
   try {
     const data = JSON.parse(raw || '{}');
     engine = require('./engine.js');
-    engine.sessionStart(data.session_id, data.cwd);
-    const fs = require('node:fs');
+    const label = engine.sessionStart(data.session_id, data.cwd, claudeSessionName(data.session_id));
     const out = [];
     const brief = engine.brief(Number(engine.opt('brief_chars', 4000)) || 4000, data.cwd);
     if (brief.trim()) out.push('## Keka memory brief\n' + brief);
@@ -34,7 +54,16 @@ process.stdin.on('end', () => {
         out.push('Recommended partner tools available — run /partners to review them. (This note disappears after the first run.)');
       }
     } catch { /* nudge is optional */ }
-    if (out.length) console.log(out.join('\n\n'));
+    if (out.length || label) {
+      console.log(JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: 'SessionStart',
+          additionalContext: out.join('\n\n'),
+          // so this session is findable by the same name keka records it under
+          ...(label ? { sessionTitle: label } : {}),
+        },
+      }));
+    }
   } catch (err) {
     try { (engine || require('./engine.js')).log('session-start', err); } catch { /* never block a session */ }
   }

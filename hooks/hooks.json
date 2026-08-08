@@ -13,7 +13,11 @@
       { "matcher": "Bash|WebFetch|Read|Write|Edit|NotebookEdit", "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.js\"", "timeout": 10, "statusMessage": "Scanning for secrets..." }] }
     ],
     "PostToolUse": [
-      { "matcher": "Edit|Write|Bash", "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/observe.js\"", "statusMessage": "Recording observation..." }] }
+      { "matcher": "Edit|Write|Bash", "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/observe.js\"", "statusMessage": "Recording observation..." }] },
+      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/seed-refresh.js\"", "timeout": 15, "statusMessage": "Refreshing team seed..." }] }
+    ],
+    "PreCompact": [
+      { "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/seed-refresh.js\"", "timeout": 15, "statusMessage": "Refreshing team seed..." }] }
     ],
     "PostToolUseFailure": [
       { "matcher": "Edit|Write|Bash", "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/observe.js\"", "statusMessage": "Recording failure..." }] }

@@ -10,15 +10,16 @@ argument-hint: [status]
 1. **Detect** (read-only) and show as a checklist:
    - `.keka/stack.md` — stack profile
    - `.keka/patterns/00-index.md` — convention manual
-   - `.keka/team.md` — trust roster
+   - `.keka/team.md` — team directory, and whether **you** are listed in it
    - `.keka/team-seed.jsonl` — a teammate's memory seed (offer `/handoff import` if present)
    - `CLAUDE.md` / `AGENTS.md` — not a gap; input for the steps below
 2. `status` argument → stop here with the checklist.
 3. **Fill gaps, in order**, confirming before each step:
-   1. `/stack`
-   2. `/patterns init` — the slow one; say so before starting
-   3. Offer `/partners` — companion tools, the user picks
-   4. **Team** — if others will work in this repo: `/handoff` to export the memory seed, a `.keka/team.md` roster, then commit `.keka/`
+   1. `/team register` — put yourself in the directory (name, email, role) so your sessions and memories are attributable
+   2. `/stack`
+   3. `/patterns init` — the slow one; say so before starting
+   4. Offer `/partners` — companion tools, the user picks
+   5. **Team** — if others will work in this repo: `/handoff` to export the seed, then commit `.keka/`. Mention that trust in teammates is set locally with `/team trust` and is never shared.
 4. **Report**: one table — step · done / skipped / failed · note.
 
 ## Rules

@@ -1,0 +1,3 @@
+# The shared seed passphrase must never be committed — it is what keeps an encrypted
+# team seed private from anyone who merely has repo access.
+.keka/seed.key
