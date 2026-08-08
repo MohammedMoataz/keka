@@ -113,7 +113,8 @@ Small enough to read in one sitting: one engine module, eight hook wirings, four
 - **Project identity travels.** A project is keyed by its git remote URL, not the path it happens to sit at, so an imported memory ranks correctly on every machine.
 - **Reading is free.** Search never touches a memory's decay clock — what you grep does not outrank what mattered.
 - **Deduplication is normalized and indexed.** Case and whitespace variants of the same fact are the same fact.
-- **The brief is bounded, and per project.** Ranking runs over a candidate window inside one project's database, so startup stays fast and a busy project cannot push a quiet one out of its own brief.
+- **Nothing is dropped before it is ranked.** Every memory in the project is scored; the character cap decides what reaches the session, and it applies *after* ranking. A strong memory buried under a thousand newer notes still surfaces. (Cost is linear: about 80 ms at 5,000 memories in a project, 380 ms at 20,000.)
+- **Search hides nothing when you ask for everything.** The short preview stays small so recall is cheap, but `--full` returns every match rather than a page of them.
 - **Trust is set once.** It lives with you, not inside a project, so rating a teammate applies everywhere you work with them.
 - **Failures are visible.** A broken hook writes the reason to the log rather than silently doing nothing.
 - **The guard scans values, not serializations.** Patterns run against the raw strings inside a tool call, so escape characters can neither hide a secret nor cause a false hit.

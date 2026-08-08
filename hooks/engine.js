@@ -405,8 +405,11 @@ function score(row) {
 // Searches this project plus your global memories — the environment traps that belong to
 // you, not to a product, must stay findable from inside any project. `all` fans out over
 // every registered project; `repo` narrows to one repository of this one.
+// `limit` caps the short-line preview only, so recall stays cheap by default. `full`
+// returns everything that matched — expanding a search must never hide a hit.
 function search(q, opts) {
   const { limit = 8, full = false, task: t, author: au, role: rl, user: un, repo: rp, all = false } = opts || {};
+  const cap = full ? Infinity : limit;
   const fq = ftsQuery(q);
   if (!fq) return [];
   let sql = `SELECT m.* FROM memories_fts f JOIN memories m ON m.id = f.rowid
@@ -417,7 +420,8 @@ function search(q, opts) {
   if (rl) { sql += ' AND lower(m.role) = ?'; params.push(String(rl).toLowerCase()); }
   if (un) { sql += ' AND lower(m.username) = ?'; params.push(String(un).toLowerCase()); }
   if (rp) { sql += ' AND lower(m.repo) = ?'; params.push(String(rp).toLowerCase()); }
-  sql += ' ORDER BY rank LIMIT ?'; params.push(limit);
+  sql += ' ORDER BY rank';
+  if (Number.isFinite(cap)) { sql += ' LIMIT ?'; params.push(cap); }
 
   const scopes = all
     ? [userDb(), ...projectList().map((p) => openTenant(p.key))]
@@ -436,7 +440,8 @@ function search(q, opts) {
       rows.push(r);
     }
   }
-  return rows.sort((a, b) => score(b) - score(a)).slice(0, limit)
+  const ranked = rows.sort((a, b) => score(b) - score(a));
+  return (Number.isFinite(cap) ? ranked.slice(0, cap) : ranked)
     .map((r) => ({ ...r, _display: full ? null : shortLine(r) }));
 }
 
@@ -475,11 +480,11 @@ function brief(maxChars, proj) {
     const prior = db().prepare(
       `SELECT id, project, name, username, author, role, summary, first_prompt, created FROM sessions
        WHERE project = ? AND task = ? AND (summary IS NOT NULL OR first_prompt IS NOT NULL)
-       ORDER BY created DESC, rowid DESC LIMIT 5`
+       ORDER BY created DESC, rowid DESC`
     ).all(p, t);
     const branchMem = db().prepare(
       `SELECT * FROM memories WHERE workspace IS NOT 1 AND project = ? AND task = ?
-       ORDER BY created DESC, id DESC LIMIT 20`
+       ORDER BY created DESC, id DESC`
     ).all(p, t);
     if (prior.length || branchMem.length) {
       const budget = used + Math.floor(cap * BRANCH_SHARE);
@@ -497,10 +502,11 @@ function brief(maxChars, proj) {
 
   // Affine ranking within the project: your own repo outranks a sibling service, which
   // outranks your global knowledge. Workspace rows never enter.
-  // The candidate window is per-database, so a busy project can no longer push a quiet
-  // one out of its own brief — before 0.6 this query scanned every project at once.
+  // Every memory is a candidate — nothing is excluded from ranking before it has been
+  // scored, so an old but strong memory can still win. The character cap is the only
+  // limit on what reaches the session, and it applies after ranking, not before.
   const w = (m) => score(m) * (m.repo === r ? 1.5 : 1) * (t && m.task === t ? 1.5 : 1);
-  const window = 'SELECT * FROM memories WHERE workspace IS NOT 1 ORDER BY created DESC, id DESC LIMIT 500';
+  const window = 'SELECT * FROM memories WHERE workspace IS NOT 1 ORDER BY created DESC, id DESC';
   const rows = db().prepare(window).all()
     .concat(userDb().prepare(window).all()) // global memories travel into every project
     .filter((m) => !shown.has(m.id))
@@ -638,7 +644,7 @@ function seedExport(file, opts) {
     const sp = [];
     if (o.task) { ssql += ' AND task = ?'; sp.push(o.task); }
     if (o.repo) { ssql += ' AND lower(repo) = ?'; sp.push(String(o.repo).toLowerCase()); }
-    ssql += ' ORDER BY created DESC, rowid DESC LIMIT 200';
+    ssql += ' ORDER BY created DESC, rowid DESC'; // a handoff carries the whole history
     sessions = db().prepare(ssql).all(...sp);
     for (const s of sessions) lines.push(JSON.stringify({ kind: 'session', ...s }));
   }
@@ -753,7 +759,7 @@ function cli() {
         else if (a[i] === '--all') flags.all = true;
         else rest.push(a[i]);
       }
-      const rows = search(rest.join(' '), { ...flags, limit: flags.full ? 20 : 8 });
+      const rows = search(rest.join(' '), flags); // --full returns every match
       if (!rows.length) console.log('no matches');
       for (const r of rows) console.log(flags.full
         ? `#${r.id} [${r.type}]${r.workspace ? ' [workspace]' : ''} (conf ${r.confidence}) ${r.author ? '@' + r.author + ' ' : ''}${r.source ? '<' + r.source + '> ' : ''}${r.text}`

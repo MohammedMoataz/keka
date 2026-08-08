@@ -2,6 +2,15 @@
 
 Releases are git tags.
 
+## v0.6.1 — Nothing truncated before it ranks (2026-08-08)
+
+Retrieval limits removed wherever they could silently hide something you had already learned.
+
+- **Brief** — the candidate window no longer caps at the 500 newest memories. Every memory in the project is scored, and the character cap applies after ranking, so a strong memory buried under a thousand newer notes still surfaces. Branch history is no longer capped at 5 sessions and 20 memories either; the reserved character budget is the only limit.
+- **Search** — `--full` returns every match instead of the first 20. The short preview keeps its small default so ordinary recall stays cheap.
+- **Handoff** — session history is no longer truncated to the most recent 200; a seed carries the whole history.
+- Cost of the change, measured: a brief takes about 80 ms at 5,000 memories in one project and 380 ms at 20,000. Per-project databases keep that number local to the project you are actually in.
+
 ## v0.6.0 — Multi-tenant projects (2026-08-08)
 
 A project is now the **product**, and a repository is a member of it. A backend repo and a frontend repo that belong together share one memory.

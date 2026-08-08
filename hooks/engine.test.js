@@ -460,6 +460,27 @@ assert.strictEqual(shopAll.memories, 2, 'the whole project is handed off by defa
 const shopOne = e.seedExport(path.join(tmp, 'shop-api-seed.jsonl'), { repo: e.repo(apiRepo) });
 assert.strictEqual(shopOne.memories, 1, '--repo narrows the handoff to one service');
 
+// nothing is truncated before ranking: the character cap decides what reaches a session,
+// and a strong old memory is never excluded just for being old
+e.useProject(busy);
+e.add('learning', 'BURIED BUT STRONG: never migrate without a backup', 0.95, busy, null);
+for (let i = 0; i < 700; i++) e.add('note', `later filler note ${i}`, 0.4, busy, null);
+assert.ok(e.brief(4000, busy).includes('BURIED BUT STRONG'),
+  'a strong memory 700 rows deep still reaches the brief');
+assert.strictEqual(e.search('filler', { full: true }).length, 700,
+  '--full returns every match, not a page of them');
+assert.ok(e.search('filler').length <= 8, 'the short preview stays cheap by default');
+
+// a handoff carries the whole history, not the most recent slice
+e.useProject(busy);
+for (let i = 0; i < 210; i++) e.sessionEnd(`busy-s-${i}`, null); // no-ops; sessions below are real
+for (let i = 0; i < 210; i++) {
+  e.sessionStart(`bs-${i}`, busy);
+  e.sessionEnd(`bs-${i}`, `did thing ${i}`);
+}
+const bigSeed = e.seedExport(path.join(tmp, 'big-seed.jsonl'));
+assert.strictEqual(bigSeed.sessions, 210, 'every session travels in the handoff');
+
 // trust is set once, in user scope, and applies inside every tenant
 e.setTrust('shared@example.com', 'workspace', 'set once');
 for (const p of [apiRepo, quiet, busy]) {
