@@ -2,6 +2,21 @@
 
 Releases are git tags.
 
+## v0.6.0 — Multi-tenant projects (2026-08-08)
+
+A project is now the **product**, and a repository is a member of it. A backend repo and a frontend repo that belong together share one memory.
+
+- **Database per project** — `~/.keka/projects/<name>/keka.db`, with `~/.keka/keka.db` reduced to user scope: your trust settings, your global memories, and the project registry.
+- **`.keka/project.md`** — a committed declaration grouping repositories into one product. Resolution ladder: `KEKA_PROJECT` → `.keka/project.md` → the repo itself, so an undeclared repo is its own project and single-repo work is unchanged.
+- **`repo` column** on memories and sessions, plus a `repos` table inside each project recording its members (declared, or auto-registered on first sight). Brief ranking is now own-repo ×1.5 · same-branch ×1.5, so a sibling service stays visible but never outranks your own.
+- **`/project`** — show the resolved project, declare one, register a repo, list projects.
+- **`/recall`** gains `--repo` (narrow to one service) and `--all` (fan out across every project). By default it searches this project plus your global memories, so environment traps stay reachable everywhere.
+- **`/handoff`** exports the whole project by default; `--repo` narrows it.
+- **Starvation fixed** — the brief's candidate window had no project filter, so a busy project could push a quiet one out of its own brief. Per-project databases remove the failure mode entirely.
+- **Import no longer shells out per row** — `seedImport` was passing a stored project key into `add()`'s working-directory parameter, spawning two failing git processes for every imported memory; identity is now passed explicitly.
+- **Upgrade splits automatically** — the existing shared database is backed up to `keka.db.pre-0.6.0` (after a WAL checkpoint), each project's memories, sessions and observations move into their own tenant, `repo` is backfilled from the old project key, and global rows stay in user scope. Idempotent, and covered by a test that drives the CLI against a hand-built pre-0.6 database.
+- New CLI: `project`, `project register`, `repos`, `projects`, `rekey <old> <new>` (adopt rows stranded under an old identity, such as a repo that gained a remote after keka had already learned things).
+
 ## v0.5.0 — Ship, ingest, feature agents (2026-08-08)
 
 - **`/ship`** — staged work to a pull request in one pass: optional build gate from `.keka/stack.md`, branch (new or current, as an argument), conventional commit matched to the recent log, push, `gh pr create --fill --assignee @me`. Second output: refreshes the team seed and stages it, so knowledge ships with the code. Pinned to `model: haiku` / `effort: low`; one git command per call, since compound git invocations trip a repository-security prompt.

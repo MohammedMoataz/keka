@@ -19,6 +19,7 @@ process.stdin.on('end', () => {
       if (!/\bgit\b[\s\S]*\bcommit\b/.test(cmd)) process.exit(0);
     }
     engine = require('./engine.js');
+    engine.useProject(data.cwd);
     const r = engine.autoSeed(data.cwd);
     if (r) {
       console.log(JSON.stringify({

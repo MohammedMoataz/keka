@@ -6,7 +6,7 @@
     {
       "name": "keka",
       "source": "./",
-      "description": "Memory + guardrails + workflow: compounding session brief, named sessions with author/role/branch, branch recall, encrypted handoff with private trust, /recall, /ship, /ingest, cross-stack review and doc subagents, /partners catalog, prompt coach, secrets guard, conventions.",
+      "description": "Per-project memory across every repo a product spans: compounding session brief, named sessions with author/role/branch, branch recall, encrypted handoff with private trust, /recall, /project, /ship, /ingest, cross-stack review and doc subagents, /partners catalog, prompt coach, secrets guard.",
       "category": "productivity",
       "tags": ["memory", "team", "knowledge-sharing"]
     }

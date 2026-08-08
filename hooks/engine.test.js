@@ -12,22 +12,28 @@ process.env.KEKA_LOG = path.join(tmp, 'log.jsonl');
 process.env.KEKA_AUTHOR = 'tester@example.com'; // deterministic identity (no git dependence)
 const e = require('./engine.js');
 
-// ---------- upgrade path: a v0.3.0 database must survive, not throw ----------
-// schema.sql cannot widen an existing table (every statement is IF NOT EXISTS), so this
-// builds the old shape by hand and drives the real CLI against it in a child process.
+// ---------- upgrade: one shared database splits into user scope + per-project tenants ----------
+// Before 0.6 every project lived in one file. This builds that shape by hand — three
+// projects plus a global row — and drives the real CLI against it in child processes.
 {
   const { DatabaseSync } = require('node:sqlite');
-  const oldDb = path.join(tmp, 'v030.db');
+  const { spawnSync } = require('node:child_process');
+  const legacyRoot = path.join(tmp, 'legacy');
+  fs.mkdirSync(legacyRoot, { recursive: true });
+  const oldDb = path.join(legacyRoot, 'keka.db');
   const d = new DatabaseSync(oldDb);
   d.exec(`
     CREATE TABLE memories (id INTEGER PRIMARY KEY, type TEXT NOT NULL, text TEXT NOT NULL,
       text_key TEXT NOT NULL, confidence REAL DEFAULT 0.7, project TEXT, source TEXT,
-      author TEXT, task TEXT, workspace INTEGER DEFAULT 0,
+      author TEXT, username TEXT, role TEXT, task TEXT, workspace INTEGER DEFAULT 0,
       created TEXT DEFAULT (datetime('now')), uses INTEGER DEFAULT 0);
-    CREATE TABLE sessions (id TEXT PRIMARY KEY, project TEXT, author TEXT, task TEXT,
-      first_prompt TEXT, summary TEXT, created TEXT DEFAULT (datetime('now')), ended TEXT);
+    CREATE TABLE sessions (id TEXT PRIMARY KEY, project TEXT, author TEXT, username TEXT,
+      role TEXT, name TEXT, task TEXT, first_prompt TEXT, summary TEXT,
+      created TEXT DEFAULT (datetime('now')), ended TEXT);
     CREATE TABLE observations (id INTEGER PRIMARY KEY, session_id TEXT, tool TEXT,
       target TEXT, digest TEXT, created TEXT DEFAULT (datetime('now')));
+    CREATE TABLE trust (email TEXT PRIMARY KEY, level TEXT NOT NULL DEFAULT 'full',
+      note TEXT, updated TEXT DEFAULT (datetime('now')));
     CREATE VIRTUAL TABLE memories_fts USING fts5(text, content='memories', content_rowid='id');
     CREATE TRIGGER memories_ai AFTER INSERT ON memories BEGIN
       INSERT INTO memories_fts(rowid, text) VALUES (new.id, new.text);
@@ -35,33 +41,76 @@ const e = require('./engine.js');
     CREATE TRIGGER memories_ad AFTER DELETE ON memories BEGIN
       INSERT INTO memories_fts(memories_fts, rowid, text) VALUES ('delete', old.id, old.text);
     END;
-    INSERT INTO memories(type, text, text_key, confidence) VALUES('note','legacy row','legacy row',0.7);
+    INSERT INTO memories(type,text,text_key,confidence,project) VALUES
+      ('learning','api rounds half up','api rounds half up',0.9,'github.com/acme/api'),
+      ('note','api deploy drains the queue','api deploy drains the queue',0.8,'github.com/acme/api'),
+      ('note','web uses the design tokens','web uses the design tokens',0.7,'github.com/acme/web'),
+      ('learning','powershell has no && chaining','powershell has no && chaining',0.9,NULL);
+    INSERT INTO sessions(id,project,summary,task) VALUES
+      ('s-api','github.com/acme/api','fixed the rounding','main'),
+      ('s-web','github.com/acme/web','shipped the header',NULL);
+    INSERT INTO observations(session_id,tool,digest) VALUES
+      ('s-api','Edit','edit api/total.js'), ('s-web','Edit','edit web/header.tsx');
+    INSERT INTO trust(email,level) VALUES('joiner@example.com','workspace');
   `);
   d.close();
 
-  const { spawnSync } = require('node:child_process');
   const childEnv = { ...process.env, KEKA_DB: oldDb, KEKA_LOG: path.join(tmp, 'old-log.jsonl') };
-  const runOld = (...args) => spawnSync('node', [path.join(__dirname, 'engine.js'), ...args],
-    { encoding: 'utf8', env: childEnv, timeout: 20000 });
+  const runOld = (env, ...args) => spawnSync('node', [path.join(__dirname, 'engine.js'), ...args],
+    { encoding: 'utf8', env: { ...childEnv, ...env }, timeout: 20000 });
 
-  let r = runOld('add', 'learning', 'written after upgrade', '0.8');
-  assert.strictEqual(r.status, 0, 'add against a v0.3.0 db exits 0: ' + r.stderr);
-  r = runOld('search', 'upgrade');
-  assert.ok(r.stdout.includes('written after upgrade'), 'new row readable after migration');
-  r = runOld('search', 'legacy');
-  assert.ok(r.stdout.includes('legacy row'), 'pre-existing rows survive migration');
-  assert.ok(!fs.existsSync(path.join(tmp, 'old-log.jsonl')), 'upgrade logged no failures');
+  let r = runOld({}, 'projects');
+  assert.strictEqual(r.status, 0, 'first open splits without error: ' + r.stderr);
+  assert.ok(r.stdout.includes('github.com/acme/api') && r.stdout.includes('github.com/acme/web'),
+    'both projects registered: ' + r.stdout);
+  assert.ok(fs.existsSync(oldDb + '.pre-0.6.0'), 'the original database is kept as an escape hatch');
 
-  const check = new DatabaseSync(oldDb);
-  const cols = (t) => check.prepare(`PRAGMA table_info(${t})`).all().map((x) => x.name);
-  for (const c of ['username', 'role']) assert.ok(cols('memories').includes(c), 'memories.' + c + ' added');
-  for (const c of ['username', 'role', 'name']) assert.ok(cols('sessions').includes(c), 'sessions.' + c + ' added');
-  assert.ok(check.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='trust'").get(),
-    'trust table created on an existing db');
-  check.close();
+  // project rows moved out; the global row stayed behind in user scope
+  const user = new DatabaseSync(oldDb);
+  assert.strictEqual(user.prepare('SELECT COUNT(*) c FROM memories').get().c, 1, 'only the global row remains');
+  assert.strictEqual(user.prepare('SELECT text FROM memories').get().text, 'powershell has no && chaining',
+    'the global row is the one that stayed');
+  assert.strictEqual(user.prepare('SELECT COUNT(*) c FROM sessions').get().c, 0, 'sessions all moved');
+  assert.strictEqual(user.prepare("SELECT level FROM trust WHERE email='joiner@example.com'").get().level,
+    'workspace', 'trust stays in user scope, untouched');
+  user.close();
+
+  // each tenant holds exactly its own rows, with repo backfilled from the old project key
+  const apiDb = new DatabaseSync(path.join(legacyRoot, 'projects', 'github.com-acme-api', 'keka.db'));
+  assert.strictEqual(apiDb.prepare('SELECT COUNT(*) c FROM memories').get().c, 2, 'api tenant has its two memories');
+  assert.strictEqual(apiDb.prepare('SELECT DISTINCT repo r FROM memories').get().r, 'github.com/acme/api',
+    'repo backfilled from the old project key');
+  assert.strictEqual(apiDb.prepare('SELECT COUNT(*) c FROM observations').get().c, 1, 'observations followed their session');
+  assert.strictEqual(apiDb.prepare('SELECT COUNT(*) c FROM repos').get().c, 1, 'the repo is registered in its project');
+  apiDb.close();
+  const webDb = new DatabaseSync(path.join(legacyRoot, 'projects', 'github.com-acme-web', 'keka.db'));
+  assert.strictEqual(webDb.prepare('SELECT COUNT(*) c FROM memories').get().c, 1, 'web tenant has its one memory');
+  webDb.close();
+
+  // searching inside a project sees that project plus global knowledge, never a sibling
+  r = runOld({ KEKA_PROJECT: 'github.com/acme/api' }, 'search', 'rounds');
+  assert.ok(r.stdout.includes('api rounds half up'), 'project memory found in its tenant: ' + r.stdout);
+  r = runOld({ KEKA_PROJECT: 'github.com/acme/api' }, 'search', 'powershell');
+  assert.ok(r.stdout.includes('powershell'), 'global memory reachable from inside a project');
+  r = runOld({ KEKA_PROJECT: 'github.com/acme/api' }, 'search', 'design tokens');
+  assert.ok(!r.stdout.includes('design tokens'), 'another project is not visible by default');
+  r = runOld({ KEKA_PROJECT: 'github.com/acme/api' }, 'search', 'design tokens', '--all');
+  assert.ok(r.stdout.includes('design tokens'), '--all reaches across projects: ' + r.stdout);
+
+  // running again must not re-split or duplicate
+  r = runOld({}, 'projects');
+  const again = new DatabaseSync(path.join(legacyRoot, 'projects', 'github.com-acme-api', 'keka.db'));
+  assert.strictEqual(again.prepare('SELECT COUNT(*) c FROM memories').get().c, 2, 'second run is a no-op');
+  again.close();
+  assert.ok(!fs.existsSync(path.join(tmp, 'old-log.jsonl')) ||
+    !fs.readFileSync(path.join(tmp, 'old-log.jsonl'), 'utf8').includes('"where":"split.backup"'),
+    'the split logged no failures');
 }
 
-// memory round-trip
+// everything below works inside one project; memories added with no project are global
+e.useProject('/demo/proj');
+
+// memory round-trip — these two are global knowledge (no project given)
 e.add('learning', 'PowerShell 5.1 has no && chaining', 0.9, null, 'test');
 e.add('note', 'seed files travel in .keka', 0.6);
 const hits = e.search('powershell chaining');
@@ -115,11 +164,15 @@ e.db().prepare("UPDATE observations SET created = datetime('now','-40 days') WHE
 assert.ok(e.pruneObservations(30) >= 1, 'old observation pruned');
 assert.ok(!e.sessionActivity('s1').observations.some((o) => o.digest === 'ancient command'), 'pruned row gone');
 
-// seed idempotency
+// seed idempotency — a seed carries the project's memories, not your global ones
+e.add('note', 'project fact one', 0.7, '/demo/proj', null);
+e.add('note', 'project fact two', 0.7, '/demo/proj', null);
+e.add('note', 'project fact three', 0.7, '/demo/proj', null);
 const seed = path.join(tmp, 'seed.jsonl');
 const exported = e.seedExport(seed);
 assert.ok(exported.memories >= 3, 'seed exported');
-const r1 = e.seedImport(seed, tmp);
+assert.ok(!fs.readFileSync(seed, 'utf8').includes('PowerShell 5.1'), 'global memories never travel in a project seed');
+const r1 = e.seedImport(seed, '/demo/proj'); // back into the project it came from
 assert.strictEqual(r1.added, 0, 'reimport adds nothing');
 assert.strictEqual(r1.dup, exported.memories, 'all dups');
 
@@ -145,7 +198,7 @@ assert.match(pb, /- \[note #\d+\] project-local wisdom/, 'brief lines carry ids'
 assert.ok(pb.includes('Last session here'), 'brief includes last session line');
 
 // author/task stamping + explicit override
-e.add('learning', 'task-scoped wisdom about exports', 0.9, null, null, { task: 'orders-v2' });
+e.add('learning', 'task-scoped wisdom about exports', 0.9, '/demo/proj', null, { task: 'orders-v2' });
 const stamped = e.search('task-scoped wisdom', { full: true })[0];
 assert.strictEqual(stamped.author, 'tester@example.com', 'author stamped from KEKA_AUTHOR');
 assert.strictEqual(stamped.task, 'orders-v2', 'explicit task kept');
@@ -177,6 +230,7 @@ fs.writeFileSync(mixSeed, [
   JSON.stringify({ type: 'learning', text: 'architect solid decision', confidence: 0.9, author: 'architect@example.com', task: 'orders-v2' }),
   JSON.stringify({ type: 'note', text: 'stranger note', confidence: 0.8, author: 'stranger@example.com' }),
 ].join('\n') + '\n');
+e.useProject(teamProj); // imports land in the project of the repo doing the importing
 const imp = e.seedImport(mixSeed, teamProj);
 assert.strictEqual(imp.added, 3, 'all three imported');
 assert.strictEqual(imp.workspace, 1, 'one held in workspace');
@@ -195,23 +249,27 @@ const reseed = path.join(tmp, 'reseed.jsonl');
 e.seedExport(reseed);
 assert.ok(!fs.readFileSync(reseed, 'utf8').includes('joiner unverified'), 'workspace row excluded from export');
 
-// project-filtered export
+// a project's export contains that project's rows and nothing else — the tenant is the filter
+e.useProject('/demo/proj');
 const pseed = path.join(tmp, 'proj-seed.jsonl');
-const pn = e.seedExport(pseed, { project: '/demo/proj' });
-assert.ok(pn.memories >= 1, 'project-filtered export non-empty');
+const pn = e.seedExport(pseed);
+assert.ok(pn.memories >= 1, 'project export non-empty');
 for (const line of fs.readFileSync(pseed, 'utf8').trim().split('\n')) {
   const row = JSON.parse(line);
   if (row.kind === 'session') continue;
   assert.strictEqual(row.project, '/demo/proj', 'every exported memory belongs to the project');
 }
+assert.ok(!fs.readFileSync(pseed, 'utf8').includes('architect solid decision'),
+  "another project's imports never leak into this project's seed");
 
 // brief: workspace rows excluded entirely; task-affine boost outranks stronger untasked memory
 process.env.KEKA_TASK = 'orders-v2';
 e.add('note', 'current-task wisdom', 0.6, '/demo/proj', null, { task: 'orders-v2' });
 e.add('note', 'untasked wisdom', 0.7, '/demo/proj', null, { task: null });
 const qb = e.brief(8000, '/demo/proj');
-assert.ok(!qb.includes('joiner unverified claim'), 'workspace row never in brief');
 assert.ok(qb.indexOf('current-task wisdom') < qb.indexOf('untasked wisdom'), 'task memory ranked first');
+e.useProject(teamProj);
+assert.ok(!e.brief(8000, teamProj).includes('joiner unverified claim'), 'workspace row never in brief');
 delete process.env.KEKA_TASK;
 
 // legacy shared trust seeded the private table on that first import
@@ -226,7 +284,7 @@ assert.strictEqual(imp2.promoted, 1, 'joiner promoted');
 const lifted = e.search('joiner unverified', { full: true })[0];
 assert.strictEqual(lifted.workspace, 0, 'no longer workspace-only');
 assert.strictEqual(lifted.confidence, 0.9, 'confidence restored');
-assert.ok(e.brief(8000, '/demo/proj').includes('joiner unverified claim'), 'promoted row now reaches the brief');
+assert.ok(e.brief(8000, teamProj).includes('joiner unverified claim'), 'promoted row now reaches the brief');
 
 // and back down: trust lowered, re-import returns the row to the workspace
 e.setTrust('joiner@example.com', 'workspace');
@@ -339,5 +397,75 @@ assert.ok(fs.readFileSync(path.join(autoDir, '.keka', 'team-seed.jsonl'), 'utf8'
 process.env.KEKA_SEED_AUTO = 'off';
 assert.strictEqual(e.autoSeed(autoDir), null, 'seed_auto off disables the refresh');
 delete process.env.KEKA_SEED_AUTO;
+
+// ---------- v0.6.0: a project may span several repositories ----------
+
+// resolution ladder: KEKA_PROJECT > .keka/project.md > this repo
+const apiRepo = path.join(tmp, 'shop-api');
+const webRepo = path.join(tmp, 'shop-web');
+for (const d of [apiRepo, webRepo]) fs.mkdirSync(path.join(d, '.keka'), { recursive: true });
+const decl = '# Project\nname: acme-shop\n\nrepos:\n  - ' + apiRepo.replace(/\\/g, '/').toLowerCase()
+  + '\n  - ' + webRepo.replace(/\\/g, '/').toLowerCase() + '\n';
+fs.writeFileSync(path.join(apiRepo, '.keka', 'project.md'), decl);
+fs.writeFileSync(path.join(webRepo, '.keka', 'project.md'), decl);
+
+const undeclared = path.join(tmp, 'solo');
+fs.mkdirSync(undeclared, { recursive: true });
+assert.strictEqual(e.project(undeclared), e.repo(undeclared),
+  'an undeclared repo is its own project — single-repo work is unchanged');
+assert.strictEqual(e.project(apiRepo), 'acme-shop', 'declaration names the project');
+assert.strictEqual(e.projectDecl(apiRepo).repos.length, 2, 'declared members parsed');
+process.env.KEKA_PROJECT = 'override-wins';
+assert.strictEqual(e.project(path.join(tmp, 'never-seen')), 'override-wins', 'env overrides the declaration');
+delete process.env.KEKA_PROJECT;
+
+// two repos, one project: memory written in one is present in the other
+e.useProject(apiRepo);
+e.add('learning', 'totals round half-up in the api', 0.9, apiRepo, null);
+e.registerRepo(e.repo(apiRepo));
+e.useProject(webRepo);
+e.add('note', 'header uses the shared tokens', 0.8, webRepo, null);
+e.registerRepo(e.repo(webRepo));
+assert.strictEqual(e.project(apiRepo), e.project(webRepo), 'both repos resolve to one project');
+assert.ok(e.search('round half-up').length === 1, 'the api memory is visible from the web repo');
+assert.deepStrictEqual(e.repoList().map((r) => r.repo).sort(),
+  [e.repo(apiRepo), e.repo(webRepo)].sort(), 'the project knows both of its repos');
+
+// ranking: your own repo first, the sibling service still present
+const sharedBrief = e.brief(8000, webRepo);
+assert.ok(sharedBrief.includes('header uses the shared tokens'), 'own-repo memory in the brief');
+assert.ok(sharedBrief.includes('totals round half-up'), 'sibling-repo memory still reaches the brief');
+assert.ok(sharedBrief.indexOf('header uses') < sharedBrief.indexOf('totals round'),
+  'own repo outranks the sibling');
+
+// --repo narrows to one service
+assert.strictEqual(e.search('tokens', { repo: e.repo(apiRepo) }).length, 0, 'repo filter excludes the sibling');
+assert.strictEqual(e.search('tokens', { repo: e.repo(webRepo) }).length, 1, 'repo filter keeps its own');
+
+// starvation: a busy project can no longer push a quiet one out of its own brief
+const quiet = path.join(tmp, 'quiet-proj');
+e.useProject(quiet);
+e.add('learning', 'QUIET CRITICAL: drain the queue before deploying', 0.95, quiet, null);
+const busy = path.join(tmp, 'busy-proj');
+e.useProject(busy);
+for (let i = 0; i < 600; i++) e.add('note', `busy routine note ${i}`, 0.5, busy, null);
+assert.ok(e.brief(4000, quiet).includes('QUIET CRITICAL'),
+  'a quiet project keeps its own memory even after 600 rows elsewhere');
+
+// handoff: whole project by default, one repo on request
+e.useProject(apiRepo);
+const shopSeed = path.join(tmp, 'shop-seed.jsonl');
+const shopAll = e.seedExport(shopSeed);
+assert.strictEqual(shopAll.memories, 2, 'the whole project is handed off by default');
+const shopOne = e.seedExport(path.join(tmp, 'shop-api-seed.jsonl'), { repo: e.repo(apiRepo) });
+assert.strictEqual(shopOne.memories, 1, '--repo narrows the handoff to one service');
+
+// trust is set once, in user scope, and applies inside every tenant
+e.setTrust('shared@example.com', 'workspace', 'set once');
+for (const p of [apiRepo, quiet, busy]) {
+  e.useProject(p);
+  assert.strictEqual(e.trustLevel('shared@example.com', p), 'workspace',
+    'one trust decision holds in every project');
+}
 
 console.log('engine.test.js: ALL PASS');

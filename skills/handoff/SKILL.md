@@ -1,6 +1,6 @@
 ---
 description: Hand your session's memory to the team, or pick up theirs - exports this project's memories and session history to .keka/team-seed.jsonl (git is the transport, optionally encrypted) and imports a teammate's with your private trust applied. Use for "hand this off", "share what I learned", "/handoff import" to load teammate knowledge.
-argument-hint: "[import] [--task <t>] [--encrypt]"
+argument-hint: "[import] [--task <t>] [--repo <r>] [--encrypt]"
 ---
 
 # /handoff — pass memory between teammates
@@ -9,8 +9,9 @@ Memories and session history travel as `.keka/team-seed.jsonl`, committed to the
 
 ## Hand off (default — you did the work)
 
-1. Run: `node "${CLAUDE_PLUGIN_ROOT}/hooks/engine.js" seed-export .keka/team-seed.jsonl --project`
-   - Current project's memories only. Add `--task "<branch>"` instead to hand off one task's memories.
+1. Run: `node "${CLAUDE_PLUGIN_ROOT}/hooks/engine.js" seed-export .keka/team-seed.jsonl`
+   - The **whole project** — every repository that belongs to it — because whoever picks up any one repo should get the full picture. Narrow with `--repo` (just this service) or `--task "<branch>"`.
+   - Your global memories never travel: they belong to you, not to the product.
    - Session rows travel too: who worked on which branch, under what session name, and what they concluded.
    - Workspace-only memories never leave — see below.
 2. Report the counts as printed (`exported N memories / M sessions`) and remind the user to commit the file.

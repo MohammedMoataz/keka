@@ -34,13 +34,13 @@ r = run('prompt.js', { session_id: 'resumed-1', cwd: '/demo/proj', prompt: 'cont
 assert.strictEqual(r.status, 0, 'prompt (resumed) exit 0');
 
 // observe: success row + failure row (FAIL prefix)
-r = run('observe.js', { session_id: 'hs1', tool_name: 'Edit', tool_input: { file_path: '/demo/proj/a.js' } });
+r = run('observe.js', { session_id: 'hs1', cwd: '/demo/proj', tool_name: 'Edit', tool_input: { file_path: '/demo/proj/a.js' } });
 assert.strictEqual(r.status, 0, 'observe exit 0');
-r = run('observe.js', { session_id: 'hs1', hook_event_name: 'PostToolUseFailure', tool_name: 'Bash', tool_input: { command: 'npm  test' } });
+r = run('observe.js', { session_id: 'hs1', cwd: '/demo/proj', hook_event_name: 'PostToolUseFailure', tool_name: 'Bash', tool_input: { command: 'npm  test' } });
 assert.strictEqual(r.status, 0, 'observe failure exit 0');
 
 // KEKA_INNER short-circuits everything
-r = run('observe.js', { session_id: 'hs1', tool_name: 'Edit', tool_input: { file_path: 'y' } }, { KEKA_INNER: '1' });
+r = run('observe.js', { session_id: 'hs1', cwd: '/demo/proj', tool_name: 'Edit', tool_input: { file_path: 'y' } }, { KEKA_INNER: '1' });
 assert.strictEqual(r.status, 0, 'inner guard exit 0');
 
 // session-end (LEARN off): closes row deterministically
@@ -114,10 +114,11 @@ assert.ok(r.stdout.includes('hooks smoke memory'), 'memory in brief');
 assert.ok(r.stdout.includes('Last session here'), 'last session line in brief');
 assert.ok(r.stdout.includes('continue the widget'), 'latest session first prompt shown');
 
-// verify DB state via engine (same KEKA_DB)
+// verify DB state via engine (same KEKA_DB, and the same project the hooks wrote under)
 process.env.KEKA_DB = env.KEKA_DB;
 process.env.KEKA_AUTHOR = env.KEKA_AUTHOR;
 const e = require('./engine.js');
+e.useProject('/demo/proj');
 const act = e.sessionActivity('hs1');
 assert.ok(act.session, 'session row exists');
 assert.strictEqual(act.session.first_prompt, 'build the widget', 'first prompt recorded');

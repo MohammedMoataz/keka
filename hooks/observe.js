@@ -20,7 +20,11 @@ process.stdin.on('end', () => {
       target = String(input.file_path || '');
       digest = failed + tool.toLowerCase() + ' ' + target.split(/[\\/]/).slice(-3).join('/');
     }
-    if (digest) require('./engine.js').observe(data.session_id, tool, target, digest);
+    if (digest) {
+      const engine = require('./engine.js');
+      engine.useProject(data.cwd); // observations belong to this project's database
+      engine.observe(data.session_id, tool, target, digest);
+    }
   } catch (err) {
     try { require('./engine.js').log('observe', err); } catch { /* silent */ }
   }

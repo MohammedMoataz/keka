@@ -17,7 +17,8 @@ process.stdin.on('end', () => {
   try {
     const data = JSON.parse(raw || '{}');
     engine = require('./engine.js');
-    engine.sessionStart(data.session_id, data.cwd); // INSERT OR IGNORE — no-op when the row exists
+    engine.useProject(data.cwd);
+    engine.sessionStart(data.session_id, data.cwd); // no-op when the row exists
     const prompt = String(data.prompt || '').trim();
     engine.firstPrompt(data.session_id, prompt);
 

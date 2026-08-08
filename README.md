@@ -15,6 +15,23 @@ Every session starts cold. You re-explain the same constraint, rediscover the sa
 
 keka makes memory the thing that carries over — and the thing you can hand to someone else. It records what a session did, distils what was worth keeping, and puts that in front of you the next time you sit down in the same repo.
 
+## One product, however many repositories
+
+A **project** is the product; a **repo** is one repository inside it. A backend and a frontend that belong together share one memory, while each line still records which repo it came from — and your own repo always ranks first. Each project gets its own database, so a busy project can never crowd out a quiet one.
+
+A repo that declares nothing is its own project, so single-repo work needs no setup. To group several, commit the same `.keka/project.md` in each:
+
+```markdown
+# Project
+name: acme-shop
+
+repos:
+  - github.com/acme/shop-api
+  - github.com/acme/shop-web
+```
+
+Knowledge that belongs to *you* rather than to a product — an environment quirk, a tool trap — is stored globally and appears in every project you open. `/recall --all` searches across all of them.
+
 ## Install
 
 Requires Node ≥ 22.5 (`node:sqlite`). Session-end learning distillation additionally needs `claude` on PATH (it degrades gracefully without it).
@@ -28,7 +45,7 @@ Dev mode without installing: `claude --plugin-dir <clone-directory>`.
 
 ## How it works
 
-Everything lives in one zero-dependency SQLite DB at `~/.keka/keka.db`; errors go to `~/.keka/log.jsonl`, never into your session.
+Zero-dependency SQLite: one database per project under `~/.keka/projects/<name>/`, plus `~/.keka/keka.db` for what belongs to you rather than to a product (your trust settings, your global memories, the list of projects). Errors go to `~/.keka/log.jsonl`, never into your session.
 
 **What happens automatically:**
 
@@ -46,7 +63,8 @@ Everything lives in one zero-dependency SQLite DB at `~/.keka/keka.db`; errors g
 - **`/recall <query>`** — FTS search over memory, progressive disclosure (short lines first, `--full` on demand).
 - **`/handoff`** — package this project's memories into `.keka/team-seed.jsonl`; commit it, git is the transport.
 - **`/handoff import`** — pick up a teammate's memories and session history. Idempotent, and your private trust decides where each one lands.
-- **`/team`** — the project directory (who's here, what they do) and your private trust settings.
+- **`/project`** — which project this repo belongs to, which repos make it up, and where its memory lives. `declare` groups several repositories into one product.
+- **`/team`** — the team directory (who's here, what they do) and your private trust settings.
 - **`/name <label>`** — label this session for the people who read the history later.
 - **`/partners`** — a curated catalog of tools that pair well with memory. Detects what you have, briefs you on what's missing, installs only what you pick.
 - **`/prompt`** — templates (bugfix, feature, refactor, research, review) and the 10 rules for prompts that land; paste a draft and get a review.
@@ -90,12 +108,13 @@ Modes, via the `partners` setting:
 
 ## Design notes
 
-Small enough to read in one sitting: one engine module, eight hook wirings, thirteen skills, two subagents, no runtime dependencies.
+Small enough to read in one sitting: one engine module, eight hook wirings, fourteen skills, two subagents, no runtime dependencies.
 
 - **Project identity travels.** A project is keyed by its git remote URL, not the path it happens to sit at, so an imported memory ranks correctly on every machine.
 - **Reading is free.** Search never touches a memory's decay clock — what you grep does not outrank what mattered.
 - **Deduplication is normalized and indexed.** Case and whitespace variants of the same fact are the same fact.
-- **The brief is bounded.** Ranking runs over a candidate window, so session startup does not slow down as the database grows.
+- **The brief is bounded, and per project.** Ranking runs over a candidate window inside one project's database, so startup stays fast and a busy project cannot push a quiet one out of its own brief.
+- **Trust is set once.** It lives with you, not inside a project, so rating a teammate applies everywhere you work with them.
 - **Failures are visible.** A broken hook writes the reason to the log rather than silently doing nothing.
 - **The guard scans values, not serializations.** Patterns run against the raw strings inside a tool call, so escape characters can neither hide a secret nor cause a false hit.
 - **Coaching is for you, not the model.** Hints surface as user-facing messages only — a critique of the prompt injected next to the prompt steers answers toward meta-commentary.

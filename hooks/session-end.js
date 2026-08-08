@@ -12,6 +12,7 @@ process.stdin.on('end', () => {
   try {
     const data = JSON.parse(raw || '{}');
     engine = require('./engine.js');
+    engine.useProject(data.cwd);
     const id = data.session_id;
     if (!id) process.exit(0);
 

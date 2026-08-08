@@ -8,6 +8,7 @@ argument-hint: [status]
 ## Steps
 
 1. **Detect** (read-only) and show as a checklist:
+   - `.keka/project.md` — which project this repo belongs to (absent means the repo is its own project, which is fine for a single-repo product)
    - `.keka/stack.md` — stack profile
    - `.keka/patterns/00-index.md` — convention manual
    - `.keka/team.md` — team directory, and whether **you** are listed in it
@@ -15,11 +16,12 @@ argument-hint: [status]
    - `CLAUDE.md` / `AGENTS.md` — not a gap; input for the steps below
 2. `status` argument → stop here with the checklist.
 3. **Fill gaps, in order**, confirming before each step:
-   1. `/team register` — put yourself in the directory (name, email, role) so your sessions and memories are attributable
-   2. `/stack`
-   3. `/patterns init` — the slow one; say so before starting
-   4. Offer `/partners` — companion tools, the user picks
-   5. **Team** — if others will work in this repo: `/handoff` to export the seed, then commit `.keka/`. Mention that trust in teammates is set locally with `/team trust` and is never shared.
+   1. `/project` — if this product spans several repositories, declare the project so they share one memory. A single-repo product needs nothing here.
+   2. `/team register` — put yourself in the directory (name, email, role) so your sessions and memories are attributable
+   3. `/stack`
+   4. `/patterns init` — the slow one; say so before starting
+   5. Offer `/partners` — companion tools, the user picks
+   6. **Team** — if others will work in this repo: `/handoff` to export the seed, then commit `.keka/`. Mention that trust in teammates is set locally with `/team trust` and is never shared.
 4. **Report**: one table — step · done / skipped / failed · note.
 
 ## Rules

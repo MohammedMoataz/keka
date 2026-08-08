@@ -1,8 +1,8 @@
 {
   "name": "keka",
   "displayName": "Keka",
-  "version": "0.5.0",
-  "description": "Memory for Claude Code — plus guardrails, conventions and workflow: a session brief that compounds, named sessions with author/role/branch identity, branch recall, encrypted team handoff with private trust, /recall search, /ship for commit-and-PR, /ingest for documents, cross-stack review and documentation subagents, a /partners tool catalog, a prompt coach and a secrets guard. Zero runtime dependencies.",
+  "version": "0.6.0",
+  "description": "Memory for Claude Code — per-project, across every repository a product spans. A session brief that compounds, named sessions with author/role/branch identity, branch recall, encrypted team handoff with private trust, /recall search, /ship for commit-and-PR, /ingest for documents, cross-stack review and documentation subagents, a /partners tool catalog, a prompt coach and a secrets guard. Zero runtime dependencies.",
   "author": { "name": "Moataz", "email": "m.moataz@ignteq.org" },
   "homepage": "https://github.com/MohammedMoataz/keka",
   "license": "MIT",

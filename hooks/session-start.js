@@ -32,8 +32,19 @@ process.stdin.on('end', () => {
   try {
     const data = JSON.parse(raw || '{}');
     engine = require('./engine.js');
+    engine.useProject(data.cwd); // resolve which project's database this session belongs to
     const label = engine.sessionStart(data.session_id, data.cwd, claudeSessionName(data.session_id));
     const out = [];
+    // a project may span several repos; register the declared members, and note when this
+    // repo is working under a project that does not list it
+    try {
+      const decl = engine.projectDecl(data.cwd);
+      for (const r of decl.repos) engine.registerRepo(r);
+      const here = engine.active().repo;
+      if (decl.name && decl.repos.length && !decl.repos.includes(String(here).toLowerCase())) {
+        out.push(`This repo (${here}) is not listed in .keka/project.md for project "${decl.name}" — memory still records it; add it to the list to make the project's shape explicit.`);
+      }
+    } catch { /* declaration is optional */ }
     const brief = engine.brief(Number(engine.opt('brief_chars', 4000)) || 4000, data.cwd);
     if (brief.trim()) out.push('## Keka memory brief\n' + brief);
     // teammate seed committed in this repo? point at it — deterministic, zero tokens

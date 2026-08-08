@@ -8,10 +8,15 @@ const path = require('node:path');
 const os = require('node:os');
 
 const HOME = path.join(os.homedir(), '.keka');
+// KEKA_DB names the USER-scope database; tenants live beside it under projects/.
+// Tests point it at a temp file and get an isolated tree for free.
 const DB_PATH = process.env.KEKA_DB || path.join(HOME, 'keka.db');
+const ROOT = path.dirname(DB_PATH);
+const PROJECTS_DIR = path.join(ROOT, 'projects');
 const SCHEMA_PATH = path.join(__dirname, '..', 'memory', 'schema.sql');
+const USER_SCHEMA_PATH = path.join(__dirname, '..', 'memory', 'user-schema.sql');
 const LOG_PATH = process.env.KEKA_LOG || path.join(HOME, 'log.jsonl');
-const PARTNERS_SEEN = path.join(path.dirname(DB_PATH), 'partners-seen'); // marker: /partners ran once, stop nudging
+const PARTNERS_SEEN = path.join(ROOT, 'partners-seen'); // marker: /partners ran once, stop nudging
 
 // failures append here instead of vanishing — "keka just stopped working" must be diagnosable
 function log(where, err) {
@@ -25,26 +30,130 @@ function log(where, err) {
 // schema.sql is CREATE ... IF NOT EXISTS throughout, so a new COLUMN in it is silently
 // ignored on a database that already exists. Every added column must also land here, or
 // upgrading installs keep the old shape and every insert naming the column throws.
-function migrate(d) {
+function migrate(d, tables) {
   const has = (t, c) => d.prepare(`PRAGMA table_info(${t})`).all().some((r) => r.name === c);
   const add = (t, c, decl) => { if (!has(t, c)) d.exec(`ALTER TABLE ${t} ADD COLUMN ${c} ${decl}`); };
   add('memories', 'username', 'TEXT');
   add('memories', 'role', 'TEXT');
-  add('sessions', 'username', 'TEXT');
-  add('sessions', 'role', 'TEXT');
-  add('sessions', 'name', 'TEXT');
+  add('memories', 'repo', 'TEXT');
+  if (tables !== 'user') {
+    add('sessions', 'username', 'TEXT');
+    add('sessions', 'role', 'TEXT');
+    add('sessions', 'name', 'TEXT');
+    add('sessions', 'repo', 'TEXT');
+  }
 }
 
-let _db = null;
-function db() {
-  if (_db) return _db;
+function open(file, schemaPath, kind) {
   const { DatabaseSync } = require('node:sqlite');
-  fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
-  _db = new DatabaseSync(DB_PATH);
-  _db.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=3000;');
-  _db.exec(fs.readFileSync(SCHEMA_PATH, 'utf8')); // creates anything missing
-  migrate(_db);                                   // widens anything that predates it
-  return _db;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const d = new DatabaseSync(file);
+  d.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=3000;');
+  d.exec(fs.readFileSync(schemaPath, 'utf8')); // creates anything missing
+  migrate(d, kind);                            // widens anything that predates it
+  return d;
+}
+
+// ---------- the two scopes ----------
+// user scope: trust, the project registry, and global memories (knowledge that belongs
+// to you rather than to any product). One file, always the same path.
+let _userDb = null;
+function userDb() {
+  if (_userDb) return _userDb;
+  _userDb = open(DB_PATH, USER_SCHEMA_PATH, 'user');
+  try { splitLegacy(_userDb); } catch (err) { log('split', err); } // one-time, see below
+  return _userDb;
+}
+
+// tenant scope: one database per project. Every hook process serves exactly one project,
+// so the active tenant is resolved once and db() keeps its zero-argument signature.
+const _tenants = new Map();
+let _active = null;
+function openTenant(key) {
+  const dir = tenantDir(key);
+  const file = path.join(dir, 'keka.db');
+  if (_tenants.has(file)) return _tenants.get(file);
+  const d = open(file, SCHEMA_PATH, 'project');
+  _tenants.set(file, d);
+  return d;
+}
+function db() {
+  return openTenant(active().project);
+}
+
+function tenantSlug(key) {
+  return String(key).toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'project';
+}
+function tenantDir(key) {
+  const known = userDb().prepare('SELECT dir FROM projects WHERE key = ?').get(key);
+  if (known) return known.dir;
+  let slug = tenantSlug(key);
+  const taken = userDb().prepare('SELECT key FROM projects WHERE dir = ?');
+  let dir = path.join(PROJECTS_DIR, slug), n = 2;
+  while (taken.get(dir)) { dir = path.join(PROJECTS_DIR, slug + '-' + n); n++; } // slug collision
+  userDb().prepare('INSERT OR IGNORE INTO projects(key, dir) VALUES(?,?)').run(key, dir);
+  return dir;
+}
+
+// resolve identity for this process: which repo we are in, and which project it belongs to
+function useProject(cwd) {
+  const r = repo(cwd);
+  _active = { project: project(cwd), repo: r, cwd: cwd || null };
+  return _active;
+}
+function active() {
+  return _active || useProject();
+}
+
+// ---------- the one-time split (pre-0.6 single database -> user scope + tenants) ----------
+// Before 0.6 every project shared ~/.keka/keka.db. That file becomes the user-scope
+// database, so the upgrade evacuates its project-scoped rows into per-project tenants
+// and leaves the global ones behind. Runs once, guarded by an empty registry.
+function splitLegacy(d) {
+  const hasSessions = d.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='sessions'").get();
+  if (!hasSessions) return null; // fresh install: nothing to split
+  const registered = d.prepare('SELECT COUNT(*) c FROM projects').get().c;
+  if (registered) return null;   // already split
+  const keys = d.prepare('SELECT DISTINCT project FROM memories WHERE project IS NOT NULL').all()
+    .map((r) => r.project)
+    .concat(d.prepare('SELECT DISTINCT project FROM sessions WHERE project IS NOT NULL').all().map((r) => r.project));
+  const projects = [...new Set(keys)];
+  if (!projects.length) return null;
+
+  // escape hatch first, and checkpoint so the copy is not missing the WAL
+  try {
+    d.exec('PRAGMA wal_checkpoint(TRUNCATE);');
+    fs.copyFileSync(DB_PATH, DB_PATH + '.pre-0.6.0');
+  } catch (err) { log('split.backup', err); }
+
+  const cols = (t) => d.prepare(`PRAGMA table_info(${t})`).all().map((r) => r.name);
+  const memCols = cols('memories').filter((c) => c !== 'id');
+  const sesCols = cols('sessions');
+  let moved = 0;
+  for (const key of projects) {
+    const t = openTenant(key);
+    const mem = d.prepare(`SELECT ${memCols.join(',')} FROM memories WHERE project = ?`).all(key);
+    const insMem = t.prepare(`INSERT INTO memories(${memCols.join(',')}) VALUES(${memCols.map(() => '?').join(',')})`);
+    for (const row of mem) { insMem.run(...memCols.map((c) => (c === 'repo' ? row.repo || key : row[c]))); moved++; }
+
+    const ses = d.prepare(`SELECT ${sesCols.join(',')} FROM sessions WHERE project = ?`).all(key);
+    const insSes = t.prepare(`INSERT OR IGNORE INTO sessions(${sesCols.join(',')}) VALUES(${sesCols.map(() => '?').join(',')})`);
+    const obsCols = cols('observations').filter((c) => c !== 'id');
+    const insObs = t.prepare(`INSERT INTO observations(${obsCols.join(',')}) VALUES(${obsCols.map(() => '?').join(',')})`);
+    for (const row of ses) {
+      insSes.run(...sesCols.map((c) => (c === 'repo' ? row.repo || key : row[c])));
+      for (const o of d.prepare(`SELECT ${obsCols.join(',')} FROM observations WHERE session_id = ?`).all(row.id)) {
+        insObs.run(...obsCols.map((c) => o[c]));
+      }
+    }
+    // repo column is correct by construction: before 0.6 the project key WAS the repo key
+    t.prepare('INSERT OR IGNORE INTO repos(repo) VALUES(?)').run(key);
+    d.prepare('DELETE FROM observations WHERE session_id IN (SELECT id FROM sessions WHERE project = ?)').run(key);
+    d.prepare('DELETE FROM sessions WHERE project = ?').run(key);
+    d.prepare('DELETE FROM memories WHERE project = ?').run(key);
+  }
+  log('split', `moved ${moved} memories into ${projects.length} project databases; backup at ${path.basename(DB_PATH)}.pre-0.6.0`);
+  return { projects: projects.length, memories: moved };
 }
 
 // option lookup: KEKA_<KEY> env (power-user override) > plugin userConfig
@@ -109,15 +218,56 @@ function normalizeRemote(url) {
   if (ssh) return ssh[1] + '/' + ssh[2];
   return u.replace(/^[a-z+]+:\/\//, '').replace(/^[^@/]+@/, ''); // scheme, then credentials
 }
-const _projCache = new Map();
-function project(cwd) {
+const _repoCache = new Map();
+function repo(cwd) { // identity of ONE repository
   const key = String(cwd || process.env.CLAUDE_PROJECT_DIR || process.cwd());
-  if (_projCache.has(key)) return _projCache.get(key);
+  if (_repoCache.has(key)) return _repoCache.get(key);
   const remote = git('remote get-url origin', key);
   const p = remote ? normalizeRemote(remote)
     : (git('rev-parse --show-toplevel', key) || key).replace(/\\/g, '/').toLowerCase();
+  _repoCache.set(key, p);
+  return p;
+}
+
+// A project is a product, which may be several repositories: a backend and a frontend,
+// or a fleet of services. Each repo declares its project in a committed .keka/project.md;
+// an undeclared repo is its own project, so single-repo work behaves exactly as before.
+function projectFile(cwd) {
+  return path.join(String(cwd || process.env.CLAUDE_PROJECT_DIR || process.cwd()), '.keka', 'project.md');
+}
+function projectDecl(cwd) {
+  const out = { name: null, repos: [] };
+  try {
+    for (const line of fs.readFileSync(projectFile(cwd), 'utf8').split('\n')) {
+      const n = line.match(/^\s*name:\s*(.+?)\s*$/i);
+      if (n) { out.name = n[1].toLowerCase(); continue; }
+      const r = line.match(/^\s*[-*]\s*(\S+)\s*$/); // members of the `repos:` list
+      if (r) out.repos.push(r[1].toLowerCase());
+    }
+  } catch { /* undeclared — the repo is its own project */ }
+  return out;
+}
+const _projCache = new Map();
+function project(cwd) { // identity of the TENANT: env > .keka/project.md > this repo
+  const key = String(cwd || process.env.CLAUDE_PROJECT_DIR || process.cwd());
+  if (_projCache.has(key)) return _projCache.get(key);
+  const p = (process.env.KEKA_PROJECT || projectDecl(cwd).name || repo(cwd)).toLowerCase();
   _projCache.set(key, p);
   return p;
+}
+
+// repos are members of a project, recorded inside the tenant so the project knows its
+// own shape. Auto-registered on first sight: never a blocker, only a record.
+function registerRepo(r, name) {
+  if (!r) return null;
+  db().prepare('INSERT OR IGNORE INTO repos(repo, name) VALUES(?,?)').run(String(r).toLowerCase(), name || null);
+  return r;
+}
+function repoList() {
+  return db().prepare('SELECT * FROM repos ORDER BY added, repo').all();
+}
+function projectList() {
+  return userDb().prepare('SELECT * FROM projects ORDER BY key').all();
 }
 
 // ---------- team directory (shared) and trust (private) ----------
@@ -167,22 +317,24 @@ function legacyTrust(cwd) {
   return map;
 }
 
+// Trust lives in USER scope, not in a tenant: you rate a person once, and that judgment
+// holds in every project you share with them.
 const TRUST_LEVELS = new Set(['full', 'workspace']);
 function setTrust(email, level, note) {
   const lvl = TRUST_LEVELS.has(String(level).toLowerCase()) ? String(level).toLowerCase() : 'full';
-  db().prepare(`INSERT INTO trust(email, level, note, updated) VALUES(?,?,?,datetime('now'))
+  userDb().prepare(`INSERT INTO trust(email, level, note, updated) VALUES(?,?,?,datetime('now'))
      ON CONFLICT(email) DO UPDATE SET level = excluded.level, note = excluded.note, updated = datetime('now')`)
     .run(String(email).toLowerCase(), lvl, note || null);
   return lvl;
 }
-function trustList() { return db().prepare('SELECT * FROM trust ORDER BY email').all(); }
+function trustList() { return userDb().prepare('SELECT * FROM trust ORDER BY email').all(); }
 
 // private table wins; a legacy shared-roster value seeds a missing entry; then the default
 function trustLevel(email, cwd, legacy) {
   const fallback = String(opt('default_trust', 'full')).toLowerCase();
   if (!email) return fallback;
   const em = String(email).toLowerCase();
-  const row = db().prepare('SELECT level FROM trust WHERE email = ?').get(em);
+  const row = userDb().prepare('SELECT level FROM trust WHERE email = ?').get(em);
   if (row) return row.level;
   const old = (legacy || legacyTrust(cwd))[em];
   if (old) { setTrust(em, old, 'seeded from .keka/team.md (shared trust is deprecated)'); return old; }
@@ -194,13 +346,20 @@ function trustLevel(email, cwd, legacy) {
 const TYPES = new Set(['learning', 'note', 'reference', 'pattern']);
 function norm(text) { return String(text).toLowerCase().replace(/\s+/g, ' ').trim(); }
 
+// `proj` is a WORKING DIRECTORY, not an identity. Pass explicit identity through
+// `extra.project` / `extra.repo` (imports do, so they never shell out to git per row).
+// No project at all = a global memory: it belongs to you, not to a product.
 function add(type, text, confidence, proj, source, extra) {
   const x = extra || {};
   const au = x.author !== undefined ? x.author : author();
-  db().prepare('INSERT INTO memories(type,text,text_key,confidence,project,source,author,username,role,task,workspace) VALUES(?,?,?,?,?,?,?,?,?,?,?)')
+  const p = x.project !== undefined ? x.project : (proj ? project(proj) : null);
+  const r = x.repo !== undefined ? x.repo : (proj ? repo(proj) : null);
+  const target = p ? openTenant(p) : userDb();
+  if (p) registerRepoIn(target, r);
+  target.prepare('INSERT INTO memories(type,text,text_key,confidence,project,repo,source,author,username,role,task,workspace) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)')
     .run(TYPES.has(type) ? type : 'note', String(text), norm(text),
       confidence == null ? 0.7 : Number(confidence),
-      proj ? project(proj) : null, source || null, au,
+      p, r, source || null, au,
       x.username !== undefined ? x.username : username(),
       // snapshot the role: grouping by "what the testers found" must not shift when
       // someone's role later changes in the roster
@@ -208,13 +367,22 @@ function add(type, text, confidence, proj, source, extra) {
       x.task !== undefined ? x.task : task(null, proj),
       x.workspace ? 1 : 0);
 }
-function forget(id) {
-  const row = db().prepare('SELECT text FROM memories WHERE id = ?').get(Number(id));
-  const n = db().prepare('DELETE FROM memories WHERE id = ?').run(Number(id)).changes;
-  return n ? row.text : null; // echo what died — terminal history is the trash can
+function registerRepoIn(d, r) {
+  if (!r) return;
+  try { d.prepare('INSERT OR IGNORE INTO repos(repo) VALUES(?)').run(String(r).toLowerCase()); } catch { /* older tenant */ }
+}
+function forget(id) { // ids are per-database, so try the tenant, then user scope
+  for (const d of [db(), userDb()]) {
+    const row = d.prepare('SELECT text FROM memories WHERE id = ?').get(Number(id));
+    if (!row) continue;
+    d.prepare('DELETE FROM memories WHERE id = ?').run(Number(id));
+    return row.text; // echo what died — terminal history is the trash can
+  }
+  return null;
 }
 function hasText(text) { // dedup is on the normalized key: case/whitespace variants are the same fact
-  return !!db().prepare('SELECT 1 FROM memories WHERE text_key = ? LIMIT 1').get(norm(text));
+  const k = norm(text);
+  return [db(), userDb()].some((d) => !!d.prepare('SELECT 1 FROM memories WHERE text_key = ? LIMIT 1').get(k));
 }
 
 function ftsQuery(q) {
@@ -234,8 +402,11 @@ function score(row) {
     * Math.exp(-ageDays(row) / (DECAY_DAYS[row.type] || 30));
 }
 
+// Searches this project plus your global memories — the environment traps that belong to
+// you, not to a product, must stay findable from inside any project. `all` fans out over
+// every registered project; `repo` narrows to one repository of this one.
 function search(q, opts) {
-  const { limit = 8, full = false, task: t, author: au, role: rl, user: un } = opts || {};
+  const { limit = 8, full = false, task: t, author: au, role: rl, user: un, repo: rp, all = false } = opts || {};
   const fq = ftsQuery(q);
   if (!fq) return [];
   let sql = `SELECT m.* FROM memories_fts f JOIN memories m ON m.id = f.rowid
@@ -245,11 +416,28 @@ function search(q, opts) {
   if (au) { sql += ' AND m.author = ?'; params.push(au); }
   if (rl) { sql += ' AND lower(m.role) = ?'; params.push(String(rl).toLowerCase()); }
   if (un) { sql += ' AND lower(m.username) = ?'; params.push(String(un).toLowerCase()); }
+  if (rp) { sql += ' AND lower(m.repo) = ?'; params.push(String(rp).toLowerCase()); }
   sql += ' ORDER BY rank LIMIT ?'; params.push(limit);
-  const rows = db().prepare(sql).all(...params);
-  const bump = db().prepare('UPDATE memories SET uses = uses + 1 WHERE id = ?'); // counter only; never touches ranking
-  for (const r of rows) bump.run(r.id);
-  return rows.map((r) => ({ ...r, _display: full ? null : shortLine(r) }));
+
+  const scopes = all
+    ? [userDb(), ...projectList().map((p) => openTenant(p.key))]
+    : [db(), userDb()];
+  const seen = new Set();
+  const rows = [];
+  for (const d of scopes) {
+    let hit = [];
+    try { hit = d.prepare(sql).all(...params); } catch (err) { log('search', err); continue; }
+    const bump = d.prepare('UPDATE memories SET uses = uses + 1 WHERE id = ?'); // counter only; never ranking
+    for (const r of hit) {
+      bump.run(r.id);
+      const k = r.text_key || norm(r.text);
+      if (seen.has(k)) continue; // the same fact known in two scopes is one hit
+      seen.add(k);
+      rows.push(r);
+    }
+  }
+  return rows.sort((a, b) => score(b) - score(a)).slice(0, limit)
+    .map((r) => ({ ...r, _display: full ? null : shortLine(r) }));
 }
 
 function shortLine(r) {
@@ -262,7 +450,9 @@ const BRANCH_SHARE = 0.4; // reserved slice of the cap — general memories must
 
 function brief(maxChars, proj) {
   const cap = maxChars || 4000;
+  if (proj) useProject(proj); // the tenant must match the directory we were asked about
   const p = project(proj);
+  const r = repo(proj);
   const t = task(null, proj);
   const out = [];
   let used = 0;
@@ -305,15 +495,19 @@ function brief(maxChars, proj) {
     }
   }
 
-  // affine ranking: same-task memories outrank same-project outrank global; workspace rows never enter.
-  // ponytail: 500-newest candidate window keeps startup bounded; widen if ranking visibly misses
-  const w = (r) => score(r) * (r.project === p ? 1.5 : 1) * (t && r.task === t ? 1.5 : 1);
-  const rows = db().prepare('SELECT * FROM memories WHERE workspace IS NOT 1 ORDER BY created DESC, id DESC LIMIT 500').all()
-    .filter((r) => !shown.has(r.id))
+  // Affine ranking within the project: your own repo outranks a sibling service, which
+  // outranks your global knowledge. Workspace rows never enter.
+  // The candidate window is per-database, so a busy project can no longer push a quiet
+  // one out of its own brief — before 0.6 this query scanned every project at once.
+  const w = (m) => score(m) * (m.repo === r ? 1.5 : 1) * (t && m.task === t ? 1.5 : 1);
+  const window = 'SELECT * FROM memories WHERE workspace IS NOT 1 ORDER BY created DESC, id DESC LIMIT 500';
+  const rows = db().prepare(window).all()
+    .concat(userDb().prepare(window).all()) // global memories travel into every project
+    .filter((m) => !shown.has(m.id))
     .sort((a, b) => w(b) - w(a));
   if (rows.length) push('Top memories:');
-  for (const r of rows) {
-    if (!push(`- [${r.type} #${r.id}] ${r.text}`)) break; // ids so a wrong memory can be forgotten on sight
+  for (const m of rows) {
+    if (!push(`- [${m.type} #${m.id}] ${m.text}`)) break; // ids so a wrong memory can be forgotten on sight
   }
   return out.join('\n');
 }
@@ -322,15 +516,17 @@ function brief(maxChars, proj) {
 
 function sessionStart(id, proj, name) {
   if (!id) return null;
+  if (proj) useProject(proj);
   const existing = db().prepare('SELECT name FROM sessions WHERE id = ?').get(id);
   if (existing) { // resumed or mid-session call — never re-stamp identity
     if (name) return nameSession(id, name);
     return existing.name;
   }
-  const p = project(proj), au = author(), t = task(null, proj);
+  const p = project(proj), r = repo(proj), au = author(), t = task(null, proj);
   const label = name || autoName(p, t);
-  db().prepare('INSERT INTO sessions(id, project, author, username, role, name, task) VALUES(?,?,?,?,?,?,?)')
-    .run(id, p, au, username(), roleOf(au, proj), label, t);
+  registerRepoIn(db(), r); // the project learns its own shape as repos show up
+  db().prepare('INSERT INTO sessions(id, project, repo, author, username, role, name, task) VALUES(?,?,?,?,?,?,?,?)')
+    .run(id, p, r, au, username(), roleOf(au, proj), label, t);
   return label;
 }
 
@@ -420,13 +616,15 @@ function isSealed(raw) {
   try { const o = JSON.parse(String(raw).trim()); return !!(o && o.alg === 'aes-256-gcm' && o.ct); } catch { return false; }
 }
 
+// Exports the WHOLE project by default — a teammate picking up any repo of a product
+// should get the whole picture. `repo` narrows it to one service.
 function seedExport(file, opts) {
   const o = opts || {};
   // workspace rows never re-export: they are someone else's claim, held privately, not yours to pass on
-  let sql = 'SELECT type, text, confidence, project, source, author, username, role, task, created FROM memories WHERE workspace IS NOT 1';
+  let sql = 'SELECT type, text, confidence, project, repo, source, author, username, role, task, created FROM memories WHERE workspace IS NOT 1';
   const params = [];
   if (o.task) { sql += ' AND task = ?'; params.push(o.task); }
-  if (o.project) { sql += ' AND project = ?'; params.push(project(o.project)); }
+  if (o.repo) { sql += ' AND lower(repo) = ?'; params.push(String(o.repo).toLowerCase()); }
   sql += ' ORDER BY id';
   const rows = db().prepare(sql).all(...params);
   const lines = rows.map((r) => JSON.stringify(r));
@@ -435,18 +633,18 @@ function seedExport(file, opts) {
   // `text`, and every importer skips rows without one, so older keka versions ignore them.
   let sessions = [];
   if (o.sessions !== false) {
-    let ssql = `SELECT id, name, username, author, role, task, summary, created FROM sessions
+    let ssql = `SELECT id, name, username, author, role, repo, task, summary, created FROM sessions
        WHERE summary IS NOT NULL`;
     const sp = [];
     if (o.task) { ssql += ' AND task = ?'; sp.push(o.task); }
-    if (o.project) { ssql += ' AND project = ?'; sp.push(project(o.project)); }
+    if (o.repo) { ssql += ' AND lower(repo) = ?'; sp.push(String(o.repo).toLowerCase()); }
     ssql += ' ORDER BY created DESC, rowid DESC LIMIT 200';
     sessions = db().prepare(ssql).all(...sp);
     for (const s of sessions) lines.push(JSON.stringify({ kind: 'session', ...s }));
   }
 
   const body = lines.join('\n') + (lines.length ? '\n' : '');
-  const pass = o.encrypt ? seedKey(o.dir || o.project || process.cwd()) : null;
+  const pass = o.encrypt ? seedKey(o.dir || process.cwd()) : null;
   if (o.encrypt && !pass) throw new Error('encryption requested but no key: set KEKA_SEED_KEY or create .keka/seed.key');
   fs.writeFileSync(file, pass ? seal(body, pass) : body);
   return { memories: rows.length, sessions: sessions.length, encrypted: !!pass };
@@ -462,6 +660,8 @@ function seedImport(file, dir) {
     encrypted = true;
   }
   const legacy = legacyTrust(dir); // read once, not per row
+  if (dir) useProject(dir);
+  const here = project(dir);       // imported rows join the project doing the importing
   const lines = raw.split('\n').filter((l) => l.trim());
   const find = db().prepare('SELECT id, author, workspace FROM memories WHERE text_key = ? LIMIT 1');
   const findSession = db().prepare('SELECT id FROM sessions WHERE id = ?');
@@ -471,8 +671,8 @@ function seedImport(file, dir) {
 
     if (r.kind === 'session') { // teammate session history: identity only, never a memory
       if (!r.id || findSession.get(r.id)) continue;
-      db().prepare('INSERT INTO sessions(id, project, author, username, role, name, task, summary, created) VALUES(?,?,?,?,?,?,?,?,?)')
-        .run(r.id, project(dir), r.author || null, r.username || null, r.role || null,
+      db().prepare('INSERT INTO sessions(id, project, repo, author, username, role, name, task, summary, created) VALUES(?,?,?,?,?,?,?,?,?,?)')
+        .run(r.id, here, r.repo || null, r.author || null, r.username || null, r.role || null,
           r.name || null, r.task || null, r.summary || null, r.created || new Date().toISOString().slice(0, 19).replace('T', ' '));
       sessions++;
       continue;
@@ -493,8 +693,11 @@ function seedImport(file, dir) {
       }
       continue;
     }
-    add(r.type || 'note', r.text, w ? Math.min(conf, 0.3) : r.confidence, r.project, r.source,
-      { author: r.author || null, username: r.username || null, role: r.role || null, task: r.task || null, workspace: w });
+    // pass identity explicitly: r.project is a stored key, never a path, so it must not
+    // be handed to add() as a working directory (that shelled out to git on every row)
+    add(r.type || 'note', r.text, w ? Math.min(conf, 0.3) : r.confidence, null, r.source,
+      { project: here, repo: r.repo || null, author: r.author || null, username: r.username || null,
+        role: r.role || null, task: r.task || null, workspace: w });
     added++; if (w) workspace++;
   }
   return { added, dup, workspace, promoted, sessions, encrypted };
@@ -509,7 +712,8 @@ function autoSeed(cwd) {
   const enc = plain + '.enc';
   const target = fs.existsSync(enc) ? enc : (fs.existsSync(plain) ? plain : null);
   if (!target) return null;
-  const r = seedExport(target, { project: dir, dir, encrypt: target === enc });
+  useProject(dir);
+  const r = seedExport(target, { dir, encrypt: target === enc });
   return { file: path.basename(target), ...r };
 }
 
@@ -517,8 +721,12 @@ function autoSeed(cwd) {
 
 function cli() {
   const [cmd, ...a] = process.argv.slice(2);
+  // every CLI invocation serves one project; resolve it before touching a database
+  const cwdFlag = a.indexOf('--project') >= 0 && a[a.indexOf('--project') + 1] && !a[a.indexOf('--project') + 1].startsWith('--')
+    ? a[a.indexOf('--project') + 1] : null;
+  useProject(cwdFlag || a[a.indexOf('--dir') + 1] || process.cwd());
   switch (cmd) {
-    case 'init': db(); console.log('db ready:', DB_PATH); break;
+    case 'init': db(); console.log('project db ready:', path.join(tenantDir(active().project), 'keka.db')); break;
     case 'add': {
       const rest = []; let proj = null, t = null;
       for (let i = 0; i < a.length; i++) {
@@ -541,6 +749,8 @@ function cli() {
         else if (a[i] === '--author') flags.author = a[++i];
         else if (a[i] === '--role') flags.role = a[++i];
         else if (a[i] === '--user') flags.user = a[++i];
+        else if (a[i] === '--repo') flags.repo = a[++i];
+        else if (a[i] === '--all') flags.all = true;
         else rest.push(a[i]);
       }
       const rows = search(rest.join(' '), { ...flags, limit: flags.full ? 20 : 8 });
@@ -556,18 +766,19 @@ function cli() {
     case 'observe': observe(a[0], a[1], a[2], a.slice(3).join(' ')); break;
     case 'prune': console.log('pruned', pruneObservations(a[0]), 'observations'); break;
     case 'seed-export': {
-      const rest = []; let t = null, proj = null, encrypt = false, dir = null;
+      const rest = []; let t = null, proj = null, encrypt = false, dir = null, rp = null;
       for (let i = 0; i < a.length; i++) {
         if (a[i] === '--task') t = a[++i];
         else if (a[i] === '--project') proj = a[i + 1] && !a[i + 1].startsWith('--') ? a[++i] : process.cwd();
+        else if (a[i] === '--repo') rp = a[i + 1] && !a[i + 1].startsWith('--') ? a[++i] : active().repo;
         else if (a[i] === '--encrypt') encrypt = true;
         else if (a[i] === '--dir') dir = a[++i];
         else rest.push(a[i]);
       }
-      const r = seedExport(rest[0] || 'seed.jsonl', { task: t, project: proj, dir: dir || proj, encrypt });
+      const r = seedExport(rest[0] || 'seed.jsonl', { task: t, repo: rp, dir: dir || proj, encrypt });
       console.log(`exported ${r.memories} memories / ${r.sessions} sessions`
         + (r.encrypted ? ' (encrypted)' : '')
-        + (t ? ` (task: ${t})` : proj ? ` (project: ${project(proj)})` : ''));
+        + ` (project: ${active().project}${rp ? `, repo: ${rp}` : ''}${t ? `, task: ${t}` : ''})`);
       break;
     }
     case 'seed-import': {
@@ -621,9 +832,43 @@ function cli() {
     case 'whoami':
       console.log(JSON.stringify({
         username: username(), author: author(), role: roleOf(author(), a[0]),
-        project: project(a[0]), task: task(null, a[0]),
+        project: active().project, repo: active().repo, task: task(null, a[0]),
       }, null, 2));
       break;
+    case 'project': {
+      if (a[0] === 'register') { registerRepo(a[1] || active().repo, a[2]); console.log('repo registered:', a[1] || active().repo); break; }
+      const decl = projectDecl(active().cwd || process.cwd());
+      console.log(JSON.stringify({
+        project: active().project,
+        repo: active().repo,
+        declared: !!decl.name,
+        declaredRepos: decl.repos,
+        registeredRepos: repoList().map((r) => r.repo),
+        db: path.join(tenantDir(active().project), 'keka.db'),
+      }, null, 2));
+      break;
+    }
+    case 'repos':
+      for (const r of repoList()) console.log(`${r.repo}${r.name ? '  (' + r.name + ')' : ''}`);
+      break;
+    case 'projects': {
+      const rows = projectList();
+      if (!rows.length) console.log('no projects recorded yet');
+      for (const p of rows) console.log(`${p.key}  ->  ${p.dir}`);
+      break;
+    }
+    case 'rekey': { // adopt rows stranded under an old identity (a repo that gained a remote later)
+      const [from, to] = a;
+      if (!from || !to) { console.log('usage: engine.js rekey <old-key> <new-key>'); break; }
+      const src = openTenant(from), dst = openTenant(to);
+      const cols = src.prepare('PRAGMA table_info(memories)').all().map((r) => r.name).filter((c) => c !== 'id');
+      const rows = src.prepare(`SELECT ${cols.join(',')} FROM memories`).all();
+      const ins = dst.prepare(`INSERT INTO memories(${cols.join(',')}) VALUES(${cols.map(() => '?').join(',')})`);
+      for (const row of rows) ins.run(...cols.map((c) => (c === 'project' ? to : row[c])));
+      src.prepare('DELETE FROM memories').run();
+      console.log(`moved ${rows.length} memories: ${from} -> ${to}`);
+      break;
+    }
     case 'partners-seen':
       fs.mkdirSync(path.dirname(PARTNERS_SEEN), { recursive: true });
       fs.writeFileSync(PARTNERS_SEEN, new Date().toISOString() + '\n');
@@ -636,14 +881,16 @@ function cli() {
     }, null, 2)); break;
     default:
       console.log('usage: engine.js <init|add|forget|search|brief|session-start|session-end|name|observe|prune|'
-        + 'seed-export|seed-import|auto-seed|trust|trust-list|team-list|whoami|partners-seen|export>');
+        + 'seed-export|seed-import|auto-seed|trust|trust-list|team-list|whoami|project|repos|projects|rekey|partners-seen|export>');
   }
 }
 
 module.exports = {
-  db, log, add, forget, hasText, norm, search, brief, sessionStart, firstPrompt, observe,
-  sessionEnd, sessionActivity, pruneObservations, seedExport, seedImport, autoSeed,
-  project, normalizeRemote, opt, optOn, DB_PATH, LOG_PATH, PARTNERS_SEEN, author, username,
+  db, userDb, openTenant, useProject, active, log, add, forget, hasText, norm, search, brief,
+  sessionStart, firstPrompt, observe, sessionEnd, sessionActivity, pruneObservations,
+  seedExport, seedImport, autoSeed, project, repo, projectDecl, projectFile, registerRepo,
+  repoList, projectList, tenantDir, tenantSlug, splitLegacy, normalizeRemote, opt, optOn,
+  DB_PATH, ROOT, PROJECTS_DIR, LOG_PATH, PARTNERS_SEEN, author, username,
   task, taskSlug, roster, roleOf, legacyTrust, setTrust, trustList, trustLevel,
   nameSession, sessionLabel, autoName, seal, unseal, isSealed, seedKey,
 };
