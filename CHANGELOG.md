@@ -2,6 +2,14 @@
 
 Releases are git tags.
 
+## v0.5.0 — Ship, ingest, feature agents (2026-08-08)
+
+- **`/ship`** — staged work to a pull request in one pass: optional build gate from `.keka/stack.md`, branch (new or current, as an argument), conventional commit matched to the recent log, push, `gh pr create --fill --assignee @me`. Second output: refreshes the team seed and stages it, so knowledge ships with the code. Pinned to `model: haiku` / `effort: low`; one git command per call, since compound git invocations trip a repository-security prompt.
+- **`/ingest`** — documents and pages in, markdown out to `./docs`. New `tools/ingest.js` handles routing, pandoc conversion, source hashing, frontmatter and the index without the model; the model reads PDFs (20-page batches), fetches URLs, and refines rough conversions. Idempotent by source hash, refuses slug collisions across different sources, and records a `reference` memory per document. Covered by `tools/ingest.test.js`.
+- **`review-feature` subagent** + **`/review-feature`** — cross-stack consistency for one slice: permission parity, validation coverage, API-contract match. Every finding cites `file:line`, and findings must survive an attempt to disprove them. Accepts a free-text steer from the user, treated as a hint to verify rather than a fact.
+- **`document-feature` subagent** + **`/document-feature`** — full-stack documentation for a slice (domain model, commands and queries, frontend wiring, permissions, one end-to-end flow), grounded in citations. Refresh re-derives only sections whose sources changed. Accepts a free-text overview.
+- **pandoc** added to the `/partners` catalog, since `/ingest` degrades without it.
+
 ## v0.4.0 — Identity, sessions, and private trust (2026-08-03)
 
 - **Session identity** — sessions and memories now carry `username` and `role` alongside the author's email and branch. Roles are snapshotted when written, so `/recall --role qa` keeps meaning "what the testers found" after someone changes role. `/recall` gains `--role` and `--user`.

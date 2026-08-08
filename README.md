@@ -53,6 +53,10 @@ Everything lives in one zero-dependency SQLite DB at `~/.keka/keka.db`; errors g
 - **`/stack`** — capture the project profile (`.keka/stack.md`): roots, build/test/lint commands, conventions. Amends, never overwrites.
 - **`/patterns`** — author (`init`) or consult the convention manual at `.keka/patterns/`: how *this* codebase does commands, validation, forms… every pattern cites a real `path:line`.
 - **`/onboard`** — adopt keka in an existing repo: detect what's in place, then `/stack` → `/patterns init` → `/partners` → team setup, each step skippable.
+- **`/ship`** — staged work out the door in one pass: branch (new or current), a conventional commit matched to your log, push, PR created and self-assigned — and the team seed refreshed and committed alongside the code. Runs on a small model at low effort, because none of it needs a large one.
+- **`/ingest`** — documents and web pages in, markdown out to `./docs`, with provenance. A script does the routing, conversion, hashing and indexing; the model only reads PDFs, fetches pages, and cleans up what conversion mangles. Re-ingesting an unchanged source is a no-op.
+- **`/review-feature`** — a subagent checks one feature slice for the defects no single file reveals: an endpoint the UI guards but the backend doesn't, validation on one side only, a field the frontend reads and the backend never sends. Every finding cites `file:line`.
+- **`/document-feature`** — a subagent writes (or refreshes) full-stack documentation for a slice: domain model, commands and queries, frontend wiring, permissions, one flow traced end to end. Refresh rewrites only the sections whose sources changed.
 
 **Identity is shared; trust is private.** `.keka/team.md` is a directory everyone commits — name, email, role, nothing judgmental:
 
@@ -70,13 +74,13 @@ Whom you *trust* is a different question, and it stays on your machine — set w
 
 **Config** (plugin settings, or `KEKA_*` env override): `brief_chars` (default 4000), `learn` (default on), `partners` (`ask` | `auto` | `off`, default `ask`), `coach` (default on), `plan_review` (default on), `guard` (default on), `seed_auto` (default on), `default_trust` (default `full`).
 
-**Tests:** `node hooks/engine.test.js && node hooks/hooks.test.js` — no framework, throwaway DB.
+**Tests:** `node hooks/engine.test.js && node hooks/hooks.test.js && node tools/ingest.test.js` — no framework, throwaway DB and output directory.
 
 ## Partners
 
 keka bundles nothing beyond memory — but some tools pair well with it. `/partners` is a catalog, not a dependency list: one-line brief per tool, a check for what's already installed, and installs only for what you pick. Each verified install is recorded as a `reference` memory, so the next session's brief already knows the tool exists.
 
-The catalog: **ast-grep** (structural code search and codemods), **graphify** (architecture answers from a code graph), **spec-kit** (spec-driven development flow), **chrome-devtools** (live browser debugging over MCP), **obsidian** (notes vault access over MCP), **gsd-browser** (browser automation daemon).
+The catalog: **ast-grep** (structural code search and codemods), **graphify** (architecture answers from a code graph), **spec-kit** (spec-driven development flow), **chrome-devtools** (live browser debugging over MCP), **obsidian** (notes vault access over MCP), **pandoc** (document conversion for `/ingest`), **gsd-browser** (browser automation daemon).
 
 Modes, via the `partners` setting:
 
@@ -86,7 +90,7 @@ Modes, via the `partners` setting:
 
 ## Design notes
 
-Small enough to read in one sitting: one engine module, eight hook wirings, nine skills, no runtime dependencies.
+Small enough to read in one sitting: one engine module, eight hook wirings, thirteen skills, two subagents, no runtime dependencies.
 
 - **Project identity travels.** A project is keyed by its git remote URL, not the path it happens to sit at, so an imported memory ranks correctly on every machine.
 - **Reading is free.** Search never touches a memory's decay clock — what you grep does not outrank what mattered.

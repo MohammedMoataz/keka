@@ -47,6 +47,11 @@ When the plugin setting `partners` is `auto` (the session start note says so): i
 - Check: `claude mcp list` output contains `obsidian`
 - Install: `claude mcp add obsidian --env OBSIDIAN_API_KEY=<key> -- uvx mcp-obsidian` — needs the Obsidian app with the Local REST API community plugin enabled (the key comes from that plugin's settings).
 
+### pandoc — document conversion
+- Why: converts `.docx`, `.odt`, `.rtf`, `.html` and `.epub` to markdown; `/ingest` uses it and falls back to nothing without it.
+- Check: `pandoc --version`
+- Install: `winget install --id JohnMacFarlane.Pandoc` (Windows), `brew install pandoc` (macOS), `apt install pandoc` (Debian/Ubuntu)
+
 ### gsd-browser — browser automation daemon
 - Why: scripted browsing driven by a persistent daemon, for flows heavier than one-shot page checks.
 - Check: `gsd-browser --version`
